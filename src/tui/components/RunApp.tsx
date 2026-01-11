@@ -15,6 +15,7 @@ import { LeftPanel } from './LeftPanel.js';
 import { RightPanel } from './RightPanel.js';
 import { IterationHistoryView } from './IterationHistoryView.js';
 import { TaskDetailView } from './TaskDetailView.js';
+import { IterationDetailView } from './IterationDetailView.js';
 import type { ExecutionEngine, EngineEvent, IterationResult } from '../../engine/index.js';
 
 /**
@@ -22,8 +23,9 @@ import type { ExecutionEngine, EngineEvent, IterationResult } from '../../engine
  * - 'tasks': Show the task list (default)
  * - 'iterations': Show the iteration history
  * - 'task-detail': Show detailed view of a single task
+ * - 'iteration-detail': Show detailed view of a single iteration
  */
-type ViewMode = 'tasks' | 'iterations' | 'task-detail';
+type ViewMode = 'tasks' | 'iterations' | 'task-detail' | 'iteration-detail';
 
 /**
  * Props for the RunApp component
@@ -84,6 +86,8 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
   const [iterationSelectedIndex, setIterationSelectedIndex] = useState(0);
   // Task detail view state
   const [detailTask, setDetailTask] = useState<TaskItem | null>(null);
+  // Iteration detail view state
+  const [detailIteration, setDetailIteration] = useState<IterationResult | null>(null);
 
   // Subscribe to engine events
   useEffect(() => {
@@ -227,6 +231,9 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
           if (viewMode === 'task-detail') {
             setViewMode('tasks');
             setDetailTask(null);
+          } else if (viewMode === 'iteration-detail') {
+            setViewMode('iterations');
+            setDetailIteration(null);
           } else {
             onQuit?.();
           }
@@ -270,7 +277,7 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
 
         case 'i':
           // Toggle between tasks and iterations view (only if not in detail view)
-          if (viewMode !== 'task-detail') {
+          if (viewMode !== 'task-detail' && viewMode !== 'iteration-detail') {
             setViewMode((prev) => (prev === 'tasks' ? 'iterations' : 'tasks'));
           }
           break;
@@ -279,6 +286,7 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
           // Switch to tasks view (from any view)
           setViewMode('tasks');
           setDetailTask(null);
+          setDetailIteration(null);
           break;
 
         case 'return':
@@ -293,10 +301,12 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
           } else if (viewMode === 'iterations') {
             // Drill into selected iteration details
             if (iterations[iterationSelectedIndex]) {
+              setDetailIteration(iterations[iterationSelectedIndex]);
+              setViewMode('iteration-detail');
               onIterationDrillDown?.(iterations[iterationSelectedIndex]);
             }
           }
-          // In task-detail view, Enter does nothing
+          // In detail views, Enter does nothing
           break;
       }
     },
@@ -352,6 +362,16 @@ export function RunApp({ engine, onQuit, onTaskDrillDown, onIterationDrillDown }
             onBack={() => {
               setViewMode('tasks');
               setDetailTask(null);
+            }}
+          />
+        ) : viewMode === 'iteration-detail' && detailIteration ? (
+          // Full-screen iteration detail view
+          <IterationDetailView
+            iteration={detailIteration}
+            totalIterations={totalIterations}
+            onBack={() => {
+              setViewMode('iterations');
+              setDetailIteration(null);
             }}
           />
         ) : viewMode === 'tasks' ? (

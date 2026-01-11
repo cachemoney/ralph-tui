@@ -14,3 +14,5 @@ export { RightPanel } from './RightPanel.js';
 export { IterationHistoryView } from './IterationHistoryView.js';
 export type { IterationHistoryViewProps } from './IterationHistoryView.js';
 export { TaskDetailView } from './TaskDetailView.js';
+export { IterationDetailView } from './IterationDetailView.js';
+export type { IterationDetailViewProps } from './IterationDetailView.js';

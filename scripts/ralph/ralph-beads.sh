@@ -235,11 +235,6 @@ $PROMPT"
 
 echo "Starting Ralph (Beads + $AGENT_CLI)"
 [ "$BV_AVAILABLE" = false ] && echo "Note: bv not found, using bd-only mode"
-
-# Flush database to JSONL at startup to ensure bv sees current state
-# (issues.jsonl is git-tracked but database is not, so they can drift after branch switches)
-# Use --no-daemon to bypass daemon caching and write directly
-bd sync --flush-only --no-daemon 2>/dev/null || true
 echo ""
 
 # Get the epic we're working on
@@ -286,6 +281,10 @@ else
         echo ""
     fi
 fi
+
+# Flush database to JSONL after branch switch to ensure bv sees current state
+# (issues.jsonl is git-tracked but database is not, so they can drift after branch switches)
+bd sync --flush-only --no-daemon 2>/dev/null || true
 
 echo "Working on epic: $EPIC_ID"
 echo "Title: $EPIC_TITLE"

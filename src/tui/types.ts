@@ -50,8 +50,10 @@ export interface LeftPanelProps {
   tasks: TaskItem[];
   /** Currently selected task index */
   selectedIndex: number;
-  /** Callback when a task is selected */
+  /** Callback when a task is selected (keyboard navigation) */
   onSelectTask?: (index: number) => void;
+  /** Callback when Enter is pressed to drill into task details */
+  onTaskDrillDown?: (task: TaskItem) => void;
 }
 
 /**

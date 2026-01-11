@@ -23,6 +23,8 @@ export interface RunAppProps {
   engine: ExecutionEngine;
   /** Callback when quit is requested */
   onQuit?: () => Promise<void>;
+  /** Callback when Enter is pressed on a task to drill into details */
+  onTaskDrillDown?: (task: TaskItem) => void;
 }
 
 /**
@@ -52,7 +54,7 @@ function engineStatusToRalphStatus(
 /**
  * Main RunApp component for execution view
  */
-export function RunApp({ engine, onQuit }: RunAppProps): ReactNode {
+export function RunApp({ engine, onQuit, onTaskDrillDown }: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -212,9 +214,17 @@ export function RunApp({ engine, onQuit }: RunAppProps): ReactNode {
             engine.stop();
           }
           break;
+
+        case 'return':
+        case 'enter':
+          // Drill into selected task details
+          if (tasks[selectedIndex]) {
+            onTaskDrillDown?.(tasks[selectedIndex]);
+          }
+          break;
       }
     },
-    [tasks.length, status, engine, onQuit]
+    [tasks, selectedIndex, status, engine, onQuit, onTaskDrillDown]
   );
 
   useKeyboard(handleKeyboard);

@@ -21,6 +21,8 @@ export interface AppProps {
   initialState?: Partial<AppState>;
   /** Callback when quit is requested */
   onQuit?: () => void;
+  /** Callback when Enter is pressed on a task to drill into details */
+  onTaskDrillDown?: (task: TaskItem) => void;
 }
 
 /**
@@ -68,7 +70,7 @@ function createDefaultState(tasks: TaskItem[] = defaultTasks): AppState {
 /**
  * Main App component with responsive layout
  */
-export function App({ initialState, onQuit }: AppProps): ReactNode {
+export function App({ initialState, onQuit, onTaskDrillDown }: AppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const [state, setState] = useState<AppState>(() => ({
     ...createDefaultState(),
@@ -130,9 +132,17 @@ export function App({ initialState, onQuit }: AppProps): ReactNode {
             },
           }));
           break;
+
+        case 'return':
+        case 'enter':
+          // Drill into selected task details
+          if (tasks[selectedIndex]) {
+            onTaskDrillDown?.(tasks[selectedIndex]);
+          }
+          break;
       }
     },
-    [state.leftPanel, onQuit]
+    [state.leftPanel, onQuit, onTaskDrillDown]
   );
 
   useKeyboard(handleKeyboard);

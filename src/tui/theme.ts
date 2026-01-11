@@ -56,12 +56,13 @@ export const colors = {
 
 /**
  * Status indicator symbols
+ * Task status: ✓ (done), ▶ (active), ○ (pending), ⊘ (blocked)
  */
 export const statusIndicators = {
   done: '✓',
-  active: '●',
+  active: '▶',
   pending: '○',
-  blocked: '✗',
+  blocked: '⊘',
   running: '▶',
   paused: '⏸',
   stopped: '■',

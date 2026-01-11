@@ -57,10 +57,10 @@ export function Footer({ progress, totalTasks, completedTasks }: FooterProps): R
         <text fg={colors.fg.muted}>{shortcutText}</text>
       </box>
 
-      {/* Right section: Progress bar and task count */}
+      {/* Right section: Progress bar and task count (X/Y complete format) */}
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 1 }}>
         <text fg={colors.fg.secondary}>
-          {completedTasks}/{totalTasks}
+          {completedTasks}/{totalTasks} complete
         </text>
         <ProgressBar progress={progress} width={20} />
       </box>

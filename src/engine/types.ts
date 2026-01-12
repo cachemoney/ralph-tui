@@ -163,6 +163,7 @@ export type EngineEventType =
   | 'iteration:failed'
   | 'iteration:retrying'
   | 'iteration:skipped'
+  | 'iteration:rate-limited'
   | 'task:selected'
   | 'task:activated'
   | 'task:completed'
@@ -293,6 +294,28 @@ export interface IterationSkippedEvent extends EngineEventBase {
 }
 
 /**
+ * Iteration rate-limited event - emitted when agent hits API rate limit
+ * and engine is waiting before retry.
+ */
+export interface IterationRateLimitedEvent extends EngineEventBase {
+  type: 'iteration:rate-limited';
+  /** Iteration number */
+  iteration: number;
+  /** Task that hit rate limit */
+  task: TrackerTask;
+  /** Retry attempt number (1-based) */
+  retryAttempt: number;
+  /** Maximum retries allowed before fallback */
+  maxRetries: number;
+  /** Delay in milliseconds before retry */
+  delayMs: number;
+  /** Rate limit message from agent output */
+  rateLimitMessage?: string;
+  /** Whether delayMs came from retryAfter in response (vs calculated backoff) */
+  usedRetryAfter: boolean;
+}
+
+/**
  * Task selected event
  */
 export interface TaskSelectedEvent extends EngineEventBase {
@@ -373,6 +396,7 @@ export type EngineEvent =
   | IterationFailedEvent
   | IterationRetryingEvent
   | IterationSkippedEvent
+  | IterationRateLimitedEvent
   | TaskSelectedEvent
   | TaskActivatedEvent
   | TaskCompletedEvent

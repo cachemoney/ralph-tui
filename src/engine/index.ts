@@ -14,10 +14,13 @@ import type {
   ErrorHandlingStrategy,
   IterationResult,
   IterationStatus,
+  IterationRateLimitedEvent,
   SubagentTreeNode,
 } from './types.js';
 import { toEngineSubagentState } from './types.js';
-import type { RalphConfig } from '../config/types.js';
+import type { RalphConfig, RateLimitHandlingConfig } from '../config/types.js';
+import { DEFAULT_RATE_LIMIT_HANDLING } from '../config/types.js';
+import { RateLimitDetector, type RateLimitDetectionResult } from './rate-limit-detector.js';
 import type { TrackerPlugin, TrackerTask } from '../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionHandle } from '../plugins/agents/types.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
@@ -86,6 +89,12 @@ export class ExecutionEngine {
   private skippedTasks: Set<string> = new Set();
   /** Parser for extracting subagent lifecycle events from agent output */
   private subagentParser: SubagentTraceParser;
+  /** Rate limit detector for parsing agent output */
+  private rateLimitDetector: RateLimitDetector;
+  /** Track rate limit retry attempts per task (separate from generic retries) */
+  private rateLimitRetryMap: Map<string, number> = new Map();
+  /** Rate limit handling configuration */
+  private rateLimitConfig: Required<RateLimitHandlingConfig>;
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -107,6 +116,16 @@ export class ExecutionEngine {
       onEvent: (event) => this.handleSubagentEvent(event),
       trackHierarchy: true,
     });
+
+    // Initialize rate limit detector
+    this.rateLimitDetector = new RateLimitDetector();
+
+    // Get rate limit handling config from agent config or use defaults
+    const agentRateLimitConfig = this.config.agent.rateLimitHandling;
+    this.rateLimitConfig = {
+      ...DEFAULT_RATE_LIMIT_HANDLING,
+      ...agentRateLimitConfig,
+    };
   }
 
   /**
@@ -495,6 +514,96 @@ export class ExecutionEngine {
   }
 
   /**
+   * Check agent output for rate limit conditions.
+   * Returns detection result if rate limit is detected.
+   */
+  private checkForRateLimit(
+    stdout: string,
+    stderr: string,
+    exitCode?: number
+  ): RateLimitDetectionResult {
+    if (!this.rateLimitConfig.enabled) {
+      return { isRateLimit: false };
+    }
+
+    return this.rateLimitDetector.detect({
+      stderr,
+      stdout,
+      exitCode,
+      agentId: this.config.agent.plugin,
+    });
+  }
+
+  /**
+   * Handle rate limit with exponential backoff retry.
+   * Returns true if retry should be attempted, false if max retries exceeded.
+   *
+   * @param task - The task that hit the rate limit
+   * @param rateLimitResult - The rate limit detection result
+   * @param iteration - Current iteration number
+   * @returns true if engine should retry the task
+   */
+  private async handleRateLimitWithBackoff(
+    task: TrackerTask,
+    rateLimitResult: RateLimitDetectionResult,
+    iteration: number
+  ): Promise<boolean> {
+    const currentRetries = this.rateLimitRetryMap.get(task.id) ?? 0;
+    const maxRetries = this.rateLimitConfig.maxRetries;
+
+    // Check if we've exhausted retries
+    if (currentRetries >= maxRetries) {
+      // Clear retry count - fallback will handle this
+      this.rateLimitRetryMap.delete(task.id);
+      return false;
+    }
+
+    // Calculate backoff delay
+    const { delayMs, usedRetryAfter } = this.calculateBackoffDelay(
+      currentRetries,
+      rateLimitResult.retryAfter
+    );
+
+    // Increment retry count
+    this.rateLimitRetryMap.set(task.id, currentRetries + 1);
+
+    // Emit rate limit event
+    const event: IterationRateLimitedEvent = {
+      type: 'iteration:rate-limited',
+      timestamp: new Date().toISOString(),
+      iteration,
+      task,
+      retryAttempt: currentRetries + 1,
+      maxRetries,
+      delayMs,
+      rateLimitMessage: rateLimitResult.message,
+      usedRetryAfter,
+    };
+    this.emit(event);
+
+    // Log retry attempt
+    const delaySeconds = Math.round(delayMs / 1000);
+    const retrySource = usedRetryAfter ? 'from retryAfter header' : 'exponential backoff';
+    console.log(
+      `[rate-limit] Retry ${currentRetries + 1}/${maxRetries} in ${delaySeconds}s (${retrySource})`
+    );
+
+    // Wait for backoff delay
+    if (!this.shouldStop) {
+      await this.delay(delayMs);
+    }
+
+    return !this.shouldStop;
+  }
+
+  /**
+   * Clear rate limit retry count for a task (called on success).
+   */
+  private clearRateLimitRetryCount(taskId: string): void {
+    this.rateLimitRetryMap.delete(taskId);
+  }
+
+  /**
    * Run a single iteration
    */
   private async runIteration(task: TrackerTask): Promise<IterationResult> {
@@ -606,6 +715,47 @@ export class ExecutionEngine {
           }
         }
       }
+
+      // Check for rate limit condition before processing result
+      const rateLimitResult = this.checkForRateLimit(
+        agentResult.stdout,
+        agentResult.stderr,
+        agentResult.exitCode
+      );
+
+      if (rateLimitResult.isRateLimit) {
+        // Handle rate limit with exponential backoff
+        const shouldRetry = await this.handleRateLimitWithBackoff(
+          task,
+          rateLimitResult,
+          iteration
+        );
+
+        if (shouldRetry) {
+          // Recursively retry the iteration
+          // Decrement iteration count since runIteration increments it
+          this.state.currentIteration--;
+          return this.runIteration(task);
+        }
+
+        // Max retries exceeded - return as failed with rate limit error
+        // This will trigger fallback agent handling if configured
+        const endedAt = new Date();
+        return {
+          iteration,
+          status: 'failed',
+          task,
+          taskCompleted: false,
+          promiseComplete: false,
+          durationMs: endedAt.getTime() - startedAt.getTime(),
+          error: `Rate limit exceeded after ${this.rateLimitConfig.maxRetries} retries: ${rateLimitResult.message}`,
+          startedAt: startedAt.toISOString(),
+          endedAt: endedAt.toISOString(),
+        };
+      }
+
+      // Clear rate limit retry count on successful execution (no rate limit)
+      this.clearRateLimitRetryCount(task.id);
 
       const endedAt = new Date();
       const durationMs = endedAt.getTime() - startedAt.getTime();
@@ -774,6 +924,35 @@ export class ExecutionEngine {
   }
 
   /**
+   * Calculate exponential backoff delay for rate limit retries.
+   * Uses formula: baseBackoffMs * 3^attempt (5s, 15s, 45s with default 5s base)
+   *
+   * @param attempt - The retry attempt number (0-based)
+   * @param retryAfter - Optional retryAfter value from rate limit response (in seconds)
+   * @returns Object with delay in milliseconds and whether retryAfter was used
+   */
+  private calculateBackoffDelay(
+    attempt: number,
+    retryAfter?: number
+  ): { delayMs: number; usedRetryAfter: boolean } {
+    // If retryAfter is provided from the rate limit response, use it
+    if (retryAfter !== undefined && retryAfter > 0) {
+      return {
+        delayMs: retryAfter * 1000, // Convert seconds to milliseconds
+        usedRetryAfter: true,
+      };
+    }
+
+    // Otherwise calculate exponential backoff: base * 3^attempt
+    // With default base of 5000ms: 5s, 15s, 45s
+    const delayMs = this.rateLimitConfig.baseBackoffMs * Math.pow(3, attempt);
+    return {
+      delayMs,
+      usedRetryAfter: false,
+    };
+  }
+
+  /**
    * Reset specific task IDs back to open status.
    * Used during graceful shutdown to release tasks that were set to in_progress
    * by this session but not completed.
@@ -892,6 +1071,7 @@ export type {
   EngineSubagentState,
   ErrorHandlingConfig,
   ErrorHandlingStrategy,
+  IterationRateLimitedEvent,
   IterationResult,
   IterationStatus,
   SubagentTreeNode,

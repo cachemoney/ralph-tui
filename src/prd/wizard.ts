@@ -11,24 +11,19 @@ import type {
   GeneratedPrd,
   PrdGenerationOptions,
   PrdGenerationResult,
-  TrackerFormat,
-  ConversionResult,
 } from './types.js';
 import { CLARIFYING_QUESTIONS } from './questions.js';
 import {
   generatePrd,
   renderPrdMarkdown,
-  convertToPrdJson,
   slugify,
 } from './generator.js';
 import {
   promptText,
   promptBoolean,
-  promptSelect,
   printSection,
   printSuccess,
   printInfo,
-  printError,
 } from '../setup/prompts.js';
 
 /**
@@ -119,86 +114,6 @@ async function collectAnswers(): Promise<ClarifyingAnswers | null> {
 }
 
 /**
- * Prompt for tracker format conversion.
- */
-async function promptForConversion(): Promise<TrackerFormat | null> {
-  const wantConvert = await promptBoolean(
-    'Would you like to also generate a tracker-compatible format?',
-    {
-      default: true,
-      help: 'Generate prd.json for use with ralph-tui run',
-    }
-  );
-
-  if (!wantConvert) {
-    return null;
-  }
-
-  const format = await promptSelect<TrackerFormat>(
-    'Which tracker format?',
-    [
-      {
-        value: 'json',
-        label: 'prd.json',
-        description: 'Ralph TUI JSON tracker format',
-      },
-      {
-        value: 'beads',
-        label: 'Beads (coming soon)',
-        description: 'Create beads issues from stories',
-      },
-    ],
-    {
-      default: 'json',
-      help: 'Select the target issue tracker format',
-    }
-  );
-
-  return format;
-}
-
-/**
- * Convert PRD to the specified tracker format.
- */
-async function convertToTrackerFormat(
-  prd: GeneratedPrd,
-  format: TrackerFormat,
-  outputDir: string
-): Promise<ConversionResult> {
-  switch (format) {
-    case 'json': {
-      const jsonPath = join(outputDir, 'prd.json');
-      const jsonContent = convertToPrdJson(prd);
-
-      await writeFile(jsonPath, JSON.stringify(jsonContent, null, 2), 'utf-8');
-
-      return {
-        success: true,
-        path: jsonPath,
-        format: 'json',
-      };
-    }
-
-    case 'beads': {
-      // Beads format would require bd create commands
-      // For now, return a placeholder
-      return {
-        success: false,
-        format: 'beads',
-        error: 'Beads format conversion is not yet implemented. Use bd create manually.',
-      };
-    }
-
-    default:
-      return {
-        success: false,
-        format,
-        error: `Unknown format: ${format}`,
-      };
-  }
-}
-
-/**
  * Display a summary of the generated PRD.
  */
 function displayPrdSummary(prd: GeneratedPrd): void {
@@ -282,52 +197,11 @@ export async function runPrdWizard(
     await writeFile(mdPath, markdown, 'utf-8');
     printSuccess(`PRD saved to: ${mdPath}`);
 
-    // Ask about tracker format conversion
-    const trackerFormat = await promptForConversion();
-
-    let jsonPath: string | undefined;
-
-    if (trackerFormat) {
-      printSection('Converting to Tracker Format');
-
-      const conversionResult = await convertToTrackerFormat(
-        prd,
-        trackerFormat,
-        outputDir
-      );
-
-      if (conversionResult.success && conversionResult.path) {
-        printSuccess(`Created: ${conversionResult.path}`);
-        jsonPath = conversionResult.path;
-      } else if (conversionResult.error) {
-        printError(conversionResult.error);
-      }
-    }
-
-    // Final instructions
-    printSection('Next Steps');
-
-    console.log('  1. Review the generated PRD');
-    console.log(`     ${mdPath}`);
-    console.log();
-
-    if (jsonPath) {
-      console.log('  2. Start Ralph TUI with the generated tasks:');
-      console.log(`     ralph-tui run --prd ${jsonPath}`);
-    } else {
-      console.log('  2. Create your tracker configuration:');
-      console.log('     ralph-tui setup');
-    }
-
-    console.log();
-    console.log('  3. Create the feature branch:');
-    console.log(`     git checkout -b ${prd.branchName}`);
-    console.log();
+    // Note: Tracker conversion prompt is handled by create-prd.tsx after wizard returns
 
     return {
       success: true,
       markdownPath: mdPath,
-      jsonPath,
       prd,
     };
   } catch (error) {

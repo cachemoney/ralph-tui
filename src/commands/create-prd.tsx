@@ -1,7 +1,6 @@
 /**
  * ABOUTME: Create-PRD command for ralph-tui.
- * Starts interactive PRD creation wizard.
- * Supports both template-based wizard and AI-powered chat mode.
+ * Uses AI-powered conversation to create Product Requirements Documents.
  * After PRD creation, offers to create tracker tasks automatically.
  */
 
@@ -10,8 +9,6 @@ import { createRoot } from '@opentui/react';
 import * as readline from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runPrdWizard } from '../prd/index.js';
-import type { PrdGenerationOptions } from '../prd/types.js';
 import { PrdChatApp } from '../tui/components/PrdChatApp.js';
 import { loadStoredConfig } from '../config/index.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
@@ -34,10 +31,7 @@ export interface CreatePrdArgs {
   /** Force overwrite of existing files */
   force?: boolean;
 
-  /** Use AI-powered chat mode instead of template wizard */
-  chat?: boolean;
-
-  /** Override agent plugin for chat mode */
+  /** Override agent plugin */
   agent?: string;
 
   /** Timeout for agent calls in milliseconds */
@@ -64,8 +58,6 @@ export function parseCreatePrdArgs(args: string[]): CreatePrdArgs {
       }
     } else if (arg === '--force' || arg === '-f') {
       result.force = true;
-    } else if (arg === '--chat' || arg === '--ai') {
-      result.chat = true;
     } else if (arg === '--agent' || arg === '-a') {
       result.agent = args[++i];
     } else if (arg === '--timeout' || arg === '-t') {
@@ -87,41 +79,35 @@ export function parseCreatePrdArgs(args: string[]): CreatePrdArgs {
  */
 export function printCreatePrdHelp(): void {
   console.log(`
-ralph-tui create-prd - Create a new PRD interactively
+ralph-tui create-prd - Create a new PRD with AI assistance
 
 Usage: ralph-tui create-prd [options]
+       ralph-tui prime [options]
 
 Options:
   --cwd, -C <path>       Working directory (default: current directory)
   --output, -o <dir>     Output directory for PRD files (default: ./tasks)
-  --stories, -n <count>  Number of user stories to generate (default: 5)
-  --force, -f            Overwrite existing files without prompting
-  --chat, --ai           Use AI-powered chat mode (requires agent)
-  --agent, -a <name>     Agent plugin for chat mode (default: from config)
+  --agent, -a <name>     Agent plugin to use (default: from config)
   --timeout, -t <ms>     Timeout for AI agent calls (default: 180000)
+  --force, -f            Overwrite existing files without prompting
   --help, -h             Show this help message
 
 Description:
-  The init command creates a Product Requirements Document (PRD) for a new feature.
+  Creates a Product Requirements Document (PRD) through an AI-powered conversation.
 
-  Default mode (template wizard):
-  1. Ask for a feature description
-  2. Ask 3-5 clarifying questions about users, requirements, and success criteria
-  3. Generate a markdown PRD with user stories and acceptance criteria
-  4. Optionally generate a prd.json file for use with ralph-tui run
+  The AI agent (using the ralph-tui-prd skill):
+  1. Asks about the feature you want to build
+  2. Asks contextual follow-up questions about users, requirements, and scope
+  3. Generates a markdown PRD with user stories and acceptance criteria
+  4. Offers to create tracker tasks (prd.json or beads)
 
-  AI chat mode (--chat):
-  Uses an AI agent to have an adaptive conversation about your feature.
-  The AI asks contextual follow-up questions and generates a high-quality PRD.
-  Requires the ralph-tui-prd skill to be installed (run 'ralph-tui setup' to install).
+  Requires an AI agent to be configured. Run 'ralph-tui setup' to configure one.
 
 Examples:
-  ralph-tui create-prd                      # Start the template-based wizard
-  ralph-tui create-prd --chat               # Start AI-powered chat mode
-  ralph-tui create-prd --chat --agent claude  # Use specific agent
+  ralph-tui create-prd                      # Start AI-powered PRD creation
+  ralph-tui prime                           # Alias for create-prd
+  ralph-tui create-prd --agent claude       # Use specific agent
   ralph-tui create-prd --output ./docs      # Save PRD to custom directory
-  ralph-tui create-prd --stories 10         # Generate more user stories (template mode)
-  ralph-tui create-prd --force              # Overwrite existing PRD files
 `);
 }
 
@@ -374,53 +360,10 @@ async function runChatMode(parsedArgs: CreatePrdArgs): Promise<void> {
 
 /**
  * Execute the create-prd command.
+ * Always uses AI-powered chat mode for conversational PRD creation.
  */
 export async function executeCreatePrdCommand(args: string[]): Promise<void> {
   const parsedArgs = parseCreatePrdArgs(args);
-
-  // Check if chat mode is requested
-  if (parsedArgs.chat) {
-    await runChatMode(parsedArgs);
-    process.exit(0);
-  }
-
-  // Default: template-based wizard
-  const cwd = parsedArgs.cwd || process.cwd();
-  const options: PrdGenerationOptions = {
-    cwd,
-    outputDir: parsedArgs.output,
-    storyCount: parsedArgs.stories,
-    force: parsedArgs.force,
-  };
-
-  const result = await runPrdWizard(options);
-
-  if (result.cancelled) {
-    process.exit(0);
-  }
-
-  if (!result.success) {
-    console.error('PRD creation failed:', result.error);
-    process.exit(1);
-  }
-
-  // Offer to create tracker tasks from the PRD
-  if (result.markdownPath) {
-    const selectedTracker = await promptTrackerSelection(cwd);
-
-    if (selectedTracker) {
-      // Get agent for conversion
-      const agent = await getAgent(parsedArgs.agent);
-      if (agent) {
-        await runTrackerConversion(agent, result.markdownPath, selectedTracker, cwd);
-      } else {
-        console.log('');
-        console.log('No agent configured. To create tasks automatically:');
-        console.log('  1. Run "ralph-tui setup" to configure an agent');
-        console.log('  2. Then run: ralph-tui convert --to json ' + result.markdownPath);
-      }
-    }
-  }
-
+  await runChatMode(parsedArgs);
   process.exit(0);
 }

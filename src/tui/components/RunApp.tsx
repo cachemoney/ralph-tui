@@ -450,13 +450,19 @@ export function RunApp({
     return unsubscribe;
   }, [engine]);
 
-  // Update elapsed time every second
+  // Update elapsed time every second - only while executing
+  // Timer accumulates total execution time across all iterations
   useEffect(() => {
+    // Only run timer when actively executing an iteration
+    if (status !== 'executing') {
+      return;
+    }
+
     const interval = setInterval(() => {
       setElapsedTime((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [status]);
 
   // Get initial state from engine
   useEffect(() => {

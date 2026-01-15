@@ -117,8 +117,8 @@ export function searchDocs(query: string, limit = 10): SearchItem[] {
       if (searchableContent.includes(term)) {
         score += 10;
 
-        // Bonus for multiple occurrences
-        const occurrences = (searchableContent.match(new RegExp(term, 'g')) || []).length;
+        // Bonus for multiple occurrences (using safe string-based counting to avoid ReDoS)
+        const occurrences = searchableContent.split(term).length - 1;
         score += Math.min(occurrences - 1, 5) * 2;
       }
     }

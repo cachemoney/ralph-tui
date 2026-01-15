@@ -19,7 +19,7 @@ import { DROID_DEFAULT_COMMAND } from './config.js';
 import { DroidAgentConfigSchema, type DroidReasoningEffort } from './schema.js';
 
 export class DroidAgentPlugin extends BaseAgentPlugin {
-  readonly meta: AgentPluginMeta = {
+  private readonly baseMeta: AgentPluginMeta = {
     id: 'droid',
     name: 'Factory Droid',
     description: 'Factory Droid AI coding assistant CLI',
@@ -38,6 +38,19 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
   // Default to true: droid exec cannot show interactive prompts without a TTY
   private skipPermissions = true;
   private enableTracing = true;
+  // Track effective subagent tracing support (can be disabled via config)
+  private effectiveSupportsSubagentTracing = true;
+
+  /**
+   * Returns meta with effectiveSupportsSubagentTracing applied.
+   * This allows disabling tracing via config without mutating the base meta.
+   */
+  override get meta(): AgentPluginMeta {
+    return {
+      ...this.baseMeta,
+      supportsSubagentTracing: this.effectiveSupportsSubagentTracing,
+    };
+  }
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
@@ -69,7 +82,7 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
 
     this.enableTracing = parsed.data.enableTracing;
     if (!this.enableTracing) {
-      this.meta.supportsSubagentTracing = false;
+      this.effectiveSupportsSubagentTracing = false;
     }
   }
 

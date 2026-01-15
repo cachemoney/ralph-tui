@@ -13,8 +13,9 @@ export function AddTodo({ onAdd }: AddTodoProps) {
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (text.trim()) {
-      onAdd(text);
+    const trimmed = text.trim();
+    if (trimmed) {
+      onAdd(trimmed);
       setText("");
     }
   };

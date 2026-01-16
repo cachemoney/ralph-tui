@@ -19,13 +19,15 @@ import {
 describe('COLORS', () => {
   test('all color values are ANSI escape codes', () => {
     // Colors are ANSI escape sequences for terminal formatting
-    expect(COLORS.blue).toMatch(/^\x1b\[\d+m$/);
-    expect(COLORS.purple).toMatch(/^\x1b\[\d+m$/);
-    expect(COLORS.cyan).toMatch(/^\x1b\[\d+m$/);
-    expect(COLORS.green).toMatch(/^\x1b\[\d+m$/);
-    expect(COLORS.yellow).toMatch(/^\x1b\[\d+m$/);
-    expect(COLORS.pink).toMatch(/^\x1b\[\d+m$/);
-    expect(COLORS.muted).toMatch(/^\x1b\[\d+m$/);
+    // Use RegExp constructor to avoid embedded control characters in source
+    const ansiPattern = new RegExp('^\\x1b\\[\\d+m$');
+    expect(COLORS.blue).toMatch(ansiPattern);
+    expect(COLORS.purple).toMatch(ansiPattern);
+    expect(COLORS.cyan).toMatch(ansiPattern);
+    expect(COLORS.green).toMatch(ansiPattern);
+    expect(COLORS.yellow).toMatch(ansiPattern);
+    expect(COLORS.pink).toMatch(ansiPattern);
+    expect(COLORS.muted).toMatch(ansiPattern);
     expect(COLORS.reset).toBe('\x1b[0m');
   });
 });

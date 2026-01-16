@@ -307,9 +307,11 @@ export class StreamingOutputParser {
           keptLength += segLen;
           kept++;
         }
+        // Note: slice(-0) === slice(0) returns full array, so handle kept === 0 specially
+        const start = kept === 0 ? this.parsedSegments.length : this.parsedSegments.length - kept;
         this.parsedSegments = [
           { text: '[...output trimmed...]\n', color: 'muted' },
-          ...this.parsedSegments.slice(-kept),
+          ...this.parsedSegments.slice(start),
         ];
       }
     }
@@ -413,6 +415,7 @@ export class StreamingOutputParser {
   /**
    * Extract readable content as FormattedSegments for TUI-native color rendering.
    * Mirrors extractReadableContent but returns segments instead of strings.
+   * All segment text is stripped of ANSI codes to prevent rendering artifacts.
    */
   private extractReadableSegments(line: string): FormattedSegment[] {
     const trimmed = line.trim();
@@ -425,7 +428,8 @@ export class StreamingOutputParser {
 
         const segments = formatDroidEventToSegments(droidResult.message);
         if (segments.length > 0) {
-          return segments;
+          // Strip ANSI codes from all segment texts
+          return segments.map(s => ({ ...s, text: stripAnsiCodes(s.text) }));
         }
         // Droid event was recognized but nothing to display
         return [];
@@ -434,7 +438,7 @@ export class StreamingOutputParser {
 
     // Not JSON - return as plain text segment if it's not just whitespace
     if (!trimmed.startsWith('{')) {
-      return [{ text: trimmed }];
+      return [{ text: stripAnsiCodes(trimmed) }];
     }
 
     try {
@@ -450,14 +454,14 @@ export class StreamingOutputParser {
         const assistantEvent = event as AssistantEvent;
         const content = assistantEvent.message?.content;
         if (typeof content === 'string' && content.trim()) {
-          return [{ text: content }];
+          return [{ text: stripAnsiCodes(content) }];
         }
         if (Array.isArray(content)) {
           const textParts = content
             .filter((c): c is { type: string; text: string } => c.type === 'text' && !!c.text)
             .map((c) => c.text);
           if (textParts.length > 0) {
-            return [{ text: textParts.join('') }];
+            return [{ text: stripAnsiCodes(textParts.join('')) }];
           }
         }
       }
@@ -471,7 +475,7 @@ export class StreamingOutputParser {
     } catch {
       // Not valid JSON - return as plain text if meaningful
       if (trimmed.length > 0 && !trimmed.startsWith('{')) {
-        return [{ text: trimmed }];
+        return [{ text: stripAnsiCodes(trimmed) }];
       }
       return [];
     }

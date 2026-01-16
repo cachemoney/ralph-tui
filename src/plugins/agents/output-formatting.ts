@@ -181,7 +181,13 @@ export function formatToolCall(toolName: string, input?: ToolInputFormatters): s
     parts.push(`"${preview}"`);
   }
   if (input.old_string && input.new_string) {
-    parts.push(`edit: "${input.old_string.slice(0, 50)}..." → "${input.new_string.slice(0, 50)}..."`);
+    const displayOld = input.old_string.length > 50
+      ? input.old_string.slice(0, 50) + '...'
+      : input.old_string;
+    const displayNew = input.new_string.length > 50
+      ? input.new_string.slice(0, 50) + '...'
+      : input.new_string;
+    parts.push(`edit: "${displayOld}" → "${displayNew}"`);
   }
 
   return parts.join(' ') + '\n';
@@ -278,10 +284,16 @@ export function formatToolCallSegments(toolName: string, input?: ToolInputFormat
 
   // Edit diff
   if (input.old_string && input.new_string) {
+    const displayOld = input.old_string.length > 50
+      ? input.old_string.slice(0, 50) + '...'
+      : input.old_string;
+    const displayNew = input.new_string.length > 50
+      ? input.new_string.slice(0, 50) + '...'
+      : input.new_string;
     segments.push({ text: ' edit: "', color: 'muted' });
-    segments.push({ text: input.old_string.slice(0, 50) + '...', color: 'pink' });
+    segments.push({ text: displayOld, color: 'pink' });
     segments.push({ text: '" → "', color: 'muted' });
-    segments.push({ text: input.new_string.slice(0, 50) + '...', color: 'green' });
+    segments.push({ text: displayNew, color: 'green' });
     segments.push({ text: '"', color: 'muted' });
   }
 
@@ -422,8 +434,14 @@ export function segmentsToPlainText(segments: FormattedSegment[]): string {
  * - CSI sequences: ESC[...letter (colors, cursor, etc.)
  * - OSC sequences: ESC]...BEL (window title, etc.)
  * - Charset switching: ESC(A, ESC)B, etc.
+ *
+ * Uses RegExp constructor to avoid embedded control characters in source.
  */
-const ANSI_REGEX = /\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]/g;
+const ANSI_REGEX = new RegExp(
+  // CSI sequences: ESC[...letter | OSC sequences: ESC]...BEL | Charset: ESC(/)AB012
+  '\\x1b\\[[0-9;?]*[a-zA-Z]|\\x1b\\][^\\x07]*\\x07|\\x1b[()][AB012]',
+  'g'
+);
 
 export function stripAnsiCodes(str: string): string {
   return str.replace(ANSI_REGEX, '');

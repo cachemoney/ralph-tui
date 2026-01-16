@@ -53,10 +53,18 @@ function parseOpenCodeJsonLine(jsonLine: string): AgentDisplayEvent[] {
         break;
       }
 
-      case 'tool_result':
-        // Tool completed - mark as tool_result (shared logic will skip)
+      case 'tool_result': {
+        // Tool completed - check for errors in the result
+        const resultState = event.part?.state;
+        const isError = resultState?.isError === true || resultState?.is_error === true;
+        if (isError) {
+          const errorMsg = resultState?.error || resultState?.content || 'tool execution failed';
+          events.push({ type: 'error', message: errorMsg });
+        }
+        // Always include tool_result marker (shared logic will skip for display)
         events.push({ type: 'tool_result' });
         break;
+      }
 
       case 'step_start':
       case 'step_finish':

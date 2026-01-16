@@ -13,6 +13,7 @@ import {
   formatPattern,
   formatUrl,
   formatToolCall,
+  processAgentEvents,
 } from './output-formatting.js';
 
 describe('COLORS', () => {
@@ -267,18 +268,15 @@ describe('formatToolCall', () => {
 });
 
 describe('processAgentEvents', () => {
-  // Import needed for these tests
-  const { processAgentEvents } = require('./output-formatting.js');
-
   test('displays text events with trailing newline', () => {
-    const events = [{ type: 'text', content: 'Hello world' }];
+    const events = [{ type: 'text' as const, content: 'Hello world' }];
     const result = processAgentEvents(events);
     // Text always gets trailing newline for streaming parser compatibility
     expect(result).toBe('Hello world\n');
   });
 
   test('displays tool_use events with formatting', () => {
-    const events = [{ type: 'tool_use', name: 'read', input: { file_path: '/test.ts' } }];
+    const events = [{ type: 'tool_use' as const, name: 'read', input: { file_path: '/test.ts' } }];
     const result = processAgentEvents(events);
     expect(result).toContain('[read]');
     expect(result).toContain('/test.ts');
@@ -287,16 +285,16 @@ describe('processAgentEvents', () => {
   });
 
   test('displays error events', () => {
-    const events = [{ type: 'error', message: 'Something went wrong' }];
+    const events = [{ type: 'error' as const, message: 'Something went wrong' }];
     const result = processAgentEvents(events);
     expect(result).toContain('[Error: Something went wrong]');
   });
 
   test('skips tool_result events', () => {
     const events = [
-      { type: 'text', content: 'Before' },
-      { type: 'tool_result', content: 'This should not appear' },
-      { type: 'text', content: 'After' },
+      { type: 'text' as const, content: 'Before' },
+      { type: 'tool_result' as const, content: 'This should not appear' },
+      { type: 'text' as const, content: 'After' },
     ];
     const result = processAgentEvents(events);
     // Each text gets trailing newline
@@ -306,9 +304,9 @@ describe('processAgentEvents', () => {
 
   test('skips system events', () => {
     const events = [
-      { type: 'text', content: 'Before' },
-      { type: 'system', subtype: 'init' },
-      { type: 'text', content: 'After' },
+      { type: 'text' as const, content: 'Before' },
+      { type: 'system' as const, subtype: 'init' },
+      { type: 'text' as const, content: 'After' },
     ];
     const result = processAgentEvents(events);
     // Each text gets trailing newline
@@ -317,10 +315,10 @@ describe('processAgentEvents', () => {
 
   test('processes mixed events correctly', () => {
     const events = [
-      { type: 'text', content: 'Starting task\n' },
-      { type: 'tool_use', name: 'bash', input: { command: 'ls' } },
-      { type: 'tool_result' },
-      { type: 'text', content: 'Done!' },
+      { type: 'text' as const, content: 'Starting task\n' },
+      { type: 'tool_use' as const, name: 'bash', input: { command: 'ls' } },
+      { type: 'tool_result' as const },
+      { type: 'text' as const, content: 'Done!' },
     ];
     const result = processAgentEvents(events);
     expect(result).toContain('Starting task');
@@ -331,8 +329,8 @@ describe('processAgentEvents', () => {
 
   test('tool_use always starts on its own line', () => {
     const events = [
-      { type: 'text', content: 'Let me check that' },
-      { type: 'tool_use', name: 'read', input: { file_path: '/test.ts' } },
+      { type: 'text' as const, content: 'Let me check that' },
+      { type: 'tool_use' as const, name: 'read', input: { file_path: '/test.ts' } },
     ];
     const result = processAgentEvents(events);
     // Tool call should be on its own line (newline before the color-coded [read])
@@ -343,7 +341,7 @@ describe('processAgentEvents', () => {
   test('tool_use alone does not have leading newline', () => {
     // Tool calls only get leading newline when following content that doesn't end with newline
     const events = [
-      { type: 'tool_use', name: 'read', input: { file_path: '/test.ts' } },
+      { type: 'tool_use' as const, name: 'read', input: { file_path: '/test.ts' } },
     ];
     const result = processAgentEvents(events);
     // No preceding content, so no leading newline needed
@@ -358,8 +356,8 @@ describe('processAgentEvents', () => {
 
   test('skips text events with empty content', () => {
     const events = [
-      { type: 'text', content: '' },
-      { type: 'text', content: 'visible' },
+      { type: 'text' as const, content: '' },
+      { type: 'text' as const, content: 'visible' },
     ];
     const result = processAgentEvents(events);
     // Non-empty text gets trailing newline

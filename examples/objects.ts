@@ -47,6 +47,7 @@ export function omit<T extends object, K extends keyof T>(
 
 /**
  * Creates a deep clone of an object, copying all nested objects and arrays.
+ * Handles circular references by tracking seen objects.
  * @param obj - The object to clone
  * @returns A deep copy of the object
  * @example
@@ -56,27 +57,48 @@ export function omit<T extends object, K extends keyof T>(
  * cloned.c.push(3); // original.c is still [1, 2]
  */
 export function deepClone<T>(obj: T): T {
-  if (obj === null || typeof obj !== "object") {
-    return obj;
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map((item) => deepClone(item)) as T;
-  }
-
-  if (obj instanceof Date) {
-    return new Date(obj.getTime()) as T;
-  }
-
-  if (obj instanceof RegExp) {
-    return new RegExp(obj.source, obj.flags) as T;
-  }
-
-  const cloned = {} as T;
-  for (const key in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-      cloned[key] = deepClone(obj[key]);
+  // Internal helper that tracks seen objects to handle circular references
+  function cloneWithMap(value: unknown, seen: WeakMap<object, unknown>): unknown {
+    // Primitives and null
+    if (value === null || typeof value !== "object") {
+      return value;
     }
+
+    // Check if we've already cloned this object (circular reference)
+    if (seen.has(value as object)) {
+      return seen.get(value as object);
+    }
+
+    // Handle Date
+    if (value instanceof Date) {
+      return new Date(value.getTime());
+    }
+
+    // Handle RegExp
+    if (value instanceof RegExp) {
+      return new RegExp(value.source, value.flags);
+    }
+
+    // Handle Array
+    if (Array.isArray(value)) {
+      const clonedArray: unknown[] = [];
+      seen.set(value, clonedArray);
+      for (const item of value) {
+        clonedArray.push(cloneWithMap(item, seen));
+      }
+      return clonedArray;
+    }
+
+    // Handle plain object
+    const clonedObj: Record<string, unknown> = {};
+    seen.set(value as object, clonedObj);
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        clonedObj[key] = cloneWithMap((value as Record<string, unknown>)[key], seen);
+      }
+    }
+    return clonedObj;
   }
-  return cloned;
+
+  return cloneWithMap(obj, new WeakMap()) as T;
 }

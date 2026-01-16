@@ -553,9 +553,18 @@ export function parseDroidMessageToEvents(message: DroidJsonlMessage): AgentDisp
     }
   }
 
-  // Parse tool results (shared logic will skip these)
+  // Parse tool results - surface errors but skip successful results
   if (message.toolResults && message.toolResults.length > 0) {
-    events.push({ type: 'tool_result' });
+    for (const result of message.toolResults) {
+      if (result.isError) {
+        // Surface tool errors as error events so they're visible
+        const errorMsg = result.content || 'tool execution failed';
+        const statusSuffix = result.status ? ` (${result.status})` : '';
+        events.push({ type: 'error', message: `${errorMsg}${statusSuffix}` });
+      }
+      // Successful tool results are intentionally skipped - they contain
+      // raw output (file contents, command output) that clutters the display
+    }
   }
 
   // Parse text content

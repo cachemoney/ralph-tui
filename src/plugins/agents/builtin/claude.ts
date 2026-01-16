@@ -370,8 +370,21 @@ export class ClaudeAgentPlugin extends BaseAgentPlugin {
         }
       }
 
-      // Parse user/tool_result events
+      // Parse user/tool_result events - check for errors in tool results
       if (event.type === 'user') {
+        const message = event.message as { content?: Array<Record<string, unknown>> } | undefined;
+        if (message?.content && Array.isArray(message.content)) {
+          for (const block of message.content) {
+            // Surface tool result errors
+            if (block.type === 'tool_result' && block.is_error === true) {
+              const errorContent = typeof block.content === 'string'
+                ? block.content
+                : 'tool execution failed';
+              events.push({ type: 'error', message: errorContent });
+            }
+          }
+        }
+        // Always include tool_result marker (shared logic will skip for display)
         events.push({ type: 'tool_result' });
       }
 

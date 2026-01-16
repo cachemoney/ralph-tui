@@ -1,0 +1,102 @@
+---
+title: Sandbox
+description: Configure sandboxed agent execution with Bubblewrap or Docker.
+---
+
+## Sandbox Overview
+
+Ralph TUI can run agent commands inside a sandbox to reduce access to your machine. When enabled, the sandbox limits filesystem access to your project directory and any explicit allowlists, and can disable network access.
+
+Sandboxing is opt-in and controlled through configuration or CLI flags. Auto mode will select the most secure sandbox available for your platform.
+
+## What Sandboxing Protects
+
+- Limits write access to your project directory and any `allowPaths` you list.
+- Mounts system directories as read-only to reduce accidental changes.
+- Can disable network access to block outbound calls.
+
+## What It Does Not Protect
+
+- It is not a VM-level security boundary; treat it as defense in depth.
+- Any paths you add to `allowPaths` remain writable by the agent.
+- Any paths you add to `readOnlyPaths` remain readable by the agent.
+- It does not enforce CPU, memory, or process limits.
+
+## Platform Requirements
+
+Sandbox mode uses different backends depending on platform:
+
+- **Linux**: Bubblewrap (`bwrap`) is preferred when installed.
+- **macOS/Windows**: Docker is required for sandboxing.
+- **All platforms**: If the required backend is missing, auto mode falls back to `off`.
+
+## Install Bubblewrap (Linux)
+
+Install Bubblewrap with your package manager. On Debian/Ubuntu:
+
+```bash
+sudo apt install bubblewrap
+```
+
+## Sandbox Modes
+
+Sandbox mode is selected by the `sandbox.mode` setting or the CLI flag:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` | Use Bubblewrap on Linux if available, otherwise Docker, otherwise `off` |
+| `bwrap` | Force Bubblewrap (Linux only) |
+| `docker` | Force Docker sandboxing |
+| `off` | Disable sandboxing |
+
+## Configuration Options
+
+Configure sandboxing in your config file:
+
+```toml
+[sandbox]
+enabled = true
+mode = "auto"
+network = true
+allowPaths = ["/path/to/allow"]
+readOnlyPaths = ["/path/to/read-only"]
+image = "ubuntu:22.04"
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `sandbox.enabled` | boolean | `false` | Enable sandboxing for agent execution |
+| `sandbox.mode` | string | `"auto"` | Sandbox backend (`auto`, `bwrap`, `docker`, `off`) |
+| `sandbox.network` | boolean | `true` | Allow network access inside sandbox |
+| `sandbox.allowPaths` | string[] | `[]` | Additional writable paths (absolute or relative to project root) |
+| `sandbox.readOnlyPaths` | string[] | `[]` | Additional read-only paths (absolute or relative to project root) |
+| `sandbox.image` | string | `"ubuntu:22.04"` | Docker image for sandboxed runs |
+
+## CLI Flags
+
+CLI flags override config file settings:
+
+| Flag | Description |
+|------|-------------|
+| `--sandbox` | Enable sandboxing in auto mode |
+| `--sandbox=bwrap` | Force Bubblewrap sandboxing |
+| `--sandbox=docker` | Force Docker sandboxing |
+| `--no-sandbox` | Disable sandboxing |
+| `--no-network` | Disable network access in the sandbox |
+
+## Examples
+
+Enable sandboxing without network access:
+
+```bash
+ralph-tui run --sandbox --no-network
+```
+
+Force Docker sandboxing with a custom image:
+
+```toml
+[sandbox]
+enabled = true
+mode = "docker"
+image = "ubuntu:22.04"
+```

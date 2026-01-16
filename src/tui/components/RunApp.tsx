@@ -31,7 +31,7 @@ import type {
   RateLimitState,
 } from '../../engine/index.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
-import type { StoredConfig, SubagentDetailLevel, SandboxConfig } from '../../config/types.js';
+import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
 import type { AgentPluginMeta } from '../../plugins/agents/types.js';
 import type { TrackerPluginMeta } from '../../plugins/trackers/types.js';
 import { getIterationLogsByTask } from '../../logs/index.js';
@@ -97,6 +97,8 @@ export interface RunAppProps {
   currentModel?: string;
   /** Sandbox configuration for display in header */
   sandboxConfig?: SandboxConfig;
+  /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
 /**
@@ -302,6 +304,7 @@ export function RunApp({
   onSubagentPanelVisibilityChange,
   currentModel,
   sandboxConfig,
+  resolvedSandboxMode,
 }: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const [tasks, setTasks] = useState<TaskItem[]>(() => {
@@ -1177,6 +1180,7 @@ export function RunApp({
         maxIterations={maxIterations}
         currentModel={currentModel}
         sandboxConfig={sandboxConfig}
+        resolvedSandboxMode={resolvedSandboxMode}
       />
 
       {/* Progress Dashboard - toggleable with 'd' key */}
@@ -1190,6 +1194,7 @@ export function RunApp({
           currentTaskId={currentTaskId}
           currentTaskTitle={currentTaskTitle}
           sandboxConfig={sandboxConfig}
+          resolvedSandboxMode={resolvedSandboxMode}
         />
       )}
 
@@ -1214,6 +1219,7 @@ export function RunApp({
             subagentStats={iterationDetailSubagentStats}
             subagentTraceLoading={iterationDetailSubagentLoading}
             sandboxConfig={sandboxConfig}
+            resolvedSandboxMode={resolvedSandboxMode}
           />
         ) : viewMode === 'tasks' ? (
           <>

@@ -54,6 +54,8 @@ import type { InterruptHandler } from '../interruption/types.js';
 import { createStructuredLogger, clearProgress } from '../logs/index.js';
 import { sendCompletionNotification, sendMaxIterationsNotification, sendErrorNotification, resolveNotificationsEnabled } from '../notifications.js';
 import type { NotificationSoundMode } from '../config/types.js';
+import { detectSandboxMode } from '../sandbox/index.js';
+import type { SandboxMode } from '../sandbox/index.js';
 
 /**
  * Extended runtime options with noSetup flag
@@ -588,6 +590,8 @@ interface RunAppWrapperProps {
   currentModel?: string;
   /** Sandbox configuration for display in header */
   sandboxConfig?: SandboxConfig;
+  /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
 /**
@@ -610,6 +614,7 @@ function RunAppWrapper({
   onUpdatePersistedState,
   currentModel,
   sandboxConfig,
+  resolvedSandboxMode,
 }: RunAppWrapperProps) {
   const [showInterruptDialog, setShowInterruptDialog] = useState(false);
   const [storedConfig, setStoredConfig] = useState<StoredConfig | undefined>(initialStoredConfig);
@@ -738,6 +743,7 @@ function RunAppWrapper({
       onSubagentPanelVisibilityChange={handleSubagentPanelVisibilityChange}
       currentModel={currentModel}
       sandboxConfig={sandboxConfig}
+      resolvedSandboxMode={resolvedSandboxMode}
     />
   );
 }
@@ -943,6 +949,11 @@ async function runWithTui(
     });
   };
 
+  // Detect actual sandbox mode at startup (resolve 'auto' to concrete mode)
+  const resolvedSandboxMode = config.sandbox?.enabled
+    ? await detectSandboxMode()
+    : undefined;
+
   // Render the TUI with wrapper that manages dialog state
   // Pass initialTasks for display in "ready" state and onStart callback
   root.render(
@@ -962,6 +973,7 @@ async function runWithTui(
       onUpdatePersistedState={handleUpdatePersistedState}
       currentModel={config.model}
       sandboxConfig={config.sandbox}
+      resolvedSandboxMode={resolvedSandboxMode}
     />
   );
 

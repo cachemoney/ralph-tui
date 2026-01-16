@@ -6,7 +6,7 @@
 import type { TaskStatus, RalphStatus } from './theme.js';
 import type { IterationResult, SubagentTreeNode, ActiveAgentState, RateLimitState } from '../engine/types.js';
 import type { TaskPriority } from '../plugins/trackers/types.js';
-import type { SubagentDetailLevel, SandboxConfig } from '../config/types.js';
+import type { SubagentDetailLevel, SandboxConfig, SandboxMode } from '../config/types.js';
 
 // Re-export types for convenience
 export type { TaskPriority };
@@ -102,6 +102,8 @@ export interface HeaderProps {
   currentModel?: string;
   /** Sandbox configuration (for displaying sandbox status indicator) */
   sandboxConfig?: SandboxConfig;
+  /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
 /**

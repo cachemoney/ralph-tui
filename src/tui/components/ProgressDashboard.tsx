@@ -6,7 +6,7 @@
 
 import type { ReactNode } from 'react';
 import { colors, statusIndicators, layout, type RalphStatus } from '../theme.js';
-import type { SandboxConfig } from '../../config/types.js';
+import type { SandboxConfig, SandboxMode } from '../../config/types.js';
 
 /**
  * Props for the ProgressDashboard component
@@ -28,6 +28,8 @@ export interface ProgressDashboardProps {
   currentTaskTitle?: string;
   /** Sandbox configuration (if sandboxing is enabled) */
   sandboxConfig?: SandboxConfig;
+  /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
 }
 
 /**
@@ -41,8 +43,12 @@ function truncateText(text: string, maxWidth: number): string {
 
 /**
  * Get sandbox display string from config
+ * Shows resolved mode when mode is 'auto' (e.g., "auto (bwrap)")
  */
-function getSandboxDisplay(sandboxConfig?: SandboxConfig): string | null {
+function getSandboxDisplay(
+  sandboxConfig?: SandboxConfig,
+  resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>
+): string | null {
   if (!sandboxConfig?.enabled) {
     return null;
   }
@@ -52,8 +58,12 @@ function getSandboxDisplay(sandboxConfig?: SandboxConfig): string | null {
     return null;
   }
 
+  // Show resolved mode when mode is 'auto' (e.g., "auto (bwrap)")
+  const modeDisplay = mode === 'auto' && resolvedSandboxMode
+    ? `auto (${resolvedSandboxMode})`
+    : mode;
   const networkSuffix = sandboxConfig.network === false ? ' (no-net)' : '';
-  return `${mode}${networkSuffix}`;
+  return `${modeDisplay}${networkSuffix}`;
 }
 
 /**
@@ -102,9 +112,10 @@ export function ProgressDashboard({
   currentTaskId,
   currentTaskTitle,
   sandboxConfig,
+  resolvedSandboxMode,
 }: ProgressDashboardProps): ReactNode {
   const statusDisplay = getStatusDisplay(status, currentTaskId);
-  const sandboxDisplay = getSandboxDisplay(sandboxConfig);
+  const sandboxDisplay = getSandboxDisplay(sandboxConfig, resolvedSandboxMode);
 
   // Show current task title when executing
   const taskDisplay = currentTaskTitle && (status === 'executing' || status === 'running')

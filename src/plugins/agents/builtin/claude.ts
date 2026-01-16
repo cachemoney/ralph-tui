@@ -149,6 +149,15 @@ export class ClaudeAgentPlugin extends BaseAgentPlugin {
     };
   }
 
+  override getSandboxRequirements() {
+    return {
+      authPaths: ['~/.claude', '~/.anthropic'],
+      binaryPaths: ['/usr/local/bin', '~/.local/bin'],
+      runtimePaths: ['~/.bun', '~/.nvm'],
+      requiresNetwork: true,
+    };
+  }
+
   /**
    * Run --version to verify binary and extract version number
    */

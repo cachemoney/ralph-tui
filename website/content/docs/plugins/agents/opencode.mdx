@@ -153,17 +153,7 @@ Model names are validated by the provider's API. Invalid model names result in e
 
 ## Model Variants
 
-You can control the reasoning effort for supported models using the `variant` option. Available values depend on the model/provider:
-
-### Gemini 2.5
-
-| Variant | Description |
-|---------|-------------|
-| `minimal` | Fastest response, lower reasoning effort |
-| `high` | Increased reasoning effort for complex tasks |
-| `max` | Maximum reasoning effort (slower but more thorough) |
-
-Example:
+You can control the reasoning effort for supported models using the `variant` option:
 
 ```bash
 ralph-tui run --agent opencode --model google/gemini-2.5-pro --variant max

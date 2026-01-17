@@ -93,6 +93,15 @@ printMode = "text"
 | `timeout` | number | `0` | Execution timeout in ms (0 = no timeout) |
 | `command` | string | `"claude"` | Path to Claude CLI executable |
 
+<Callout type="tip">
+For simple configs, you can use the top-level `executable` option instead of the `[[agents]]` array:
+```toml
+agent = "claude"
+executable = "ccr code"  # Use Claude Code Router
+```
+See [Custom Executable](/docs/configuration/options#custom-executable) for details.
+</Callout>
+
 ## Models
 
 Claude Code supports three model variants:

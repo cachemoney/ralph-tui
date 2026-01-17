@@ -94,7 +94,7 @@ format = "default"
 |--------|------|---------|-------------|
 | `provider` | string | - | AI provider: `anthropic`, `openai`, `google`, `xai`, `ollama` |
 | `model` | string | - | Model name within the provider |
-| `variant` | string | - | Model reasoning effort: `minimal`, `high`, `max` |
+| `variant` | string | - | Model reasoning effort (model-specific, e.g., `minimal`, `high`, `max` for Gemini) |
 | `agent` | string | `"general"` | Agent type: `general`, `build`, or `plan` |
 | `format` | string | `"default"` | Output format: `default` or `json` |
 | `timeout` | number | `0` | Execution timeout in ms (0 = no timeout) |
@@ -153,7 +153,9 @@ Model names are validated by the provider's API. Invalid model names result in e
 
 ## Model Variants
 
-You can control the reasoning effort for supported models (like Gemini 2.5) using the `variant` option:
+You can control the reasoning effort for supported models using the `variant` option. Available values depend on the model/provider:
+
+### Gemini 2.5
 
 | Variant | Description |
 |---------|-------------|
@@ -166,6 +168,10 @@ Example:
 ```bash
 ralph-tui run --agent opencode --model google/gemini-2.5-pro --variant max
 ```
+
+<Callout type="info">
+Variant values are model-specific and validated by the provider's API. Check your model's documentation for supported variants.
+</Callout>
 
 ## Agent Types
 

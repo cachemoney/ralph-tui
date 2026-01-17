@@ -156,10 +156,9 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
       this.model = config.model;
     }
 
-    if (
-      typeof config.variant === 'string' &&
-      ['minimal', 'high', 'max'].includes(config.variant)
-    ) {
+    // Accept any variant string - validation is delegated to OpenCode CLI
+    // Different models support different variant values (e.g., Gemini: minimal/high/max)
+    if (typeof config.variant === 'string' && config.variant.length > 0) {
       this.variant = config.variant;
     }
 
@@ -438,15 +437,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
       return 'Invalid agent type. Must be one of: general, build, plan';
     }
 
-    // Validate variant
-    const variant = answers.variant;
-    if (
-      variant !== undefined &&
-      variant !== '' &&
-      !['minimal', 'high', 'max'].includes(String(variant))
-    ) {
-      return 'Invalid variant. Must be one of: minimal, high, max';
-    }
+    // Variant validation is delegated to OpenCode CLI - different models support different values
 
     return null;
   }

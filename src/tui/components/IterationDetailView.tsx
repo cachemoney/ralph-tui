@@ -561,7 +561,7 @@ function SubagentTreeSection({
         {loading ? (
           <text fg={colors.fg.dim}>Loading subagent trace...</text>
         ) : !tree || tree.length === 0 ? (
-          <text fg={colors.fg.muted}>No subagents spawned</text>
+          <text fg={colors.fg.muted}>No subagents were spawned during this iteration</text>
         ) : (
           <>
             {/* Summary line */}

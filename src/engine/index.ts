@@ -1406,6 +1406,31 @@ export class ExecutionEngine {
   }
 
   /**
+   * Get detailed information about a subagent for display.
+   * Returns the prompt, result, and timing information.
+   *
+   * @param id - Subagent ID to get details for
+   * @returns Subagent details or undefined if not found
+   */
+  getSubagentDetails(id: string): {
+    prompt?: string;
+    result?: string;
+    spawnedAt: string;
+    endedAt?: string;
+    childIds: string[];
+  } | undefined {
+    const state = this.subagentParser.getSubagent(id);
+    if (!state) return undefined;
+    return {
+      prompt: state.prompt,
+      result: state.result,
+      spawnedAt: state.spawnedAt,
+      endedAt: state.endedAt,
+      childIds: state.childIds,
+    };
+  }
+
+  /**
    * Get the currently active subagent ID (deepest in the hierarchy).
    * Returns undefined if no subagent is currently active.
    */

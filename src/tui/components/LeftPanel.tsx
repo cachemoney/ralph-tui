@@ -105,7 +105,12 @@ function buildIndentMap(tasks: TaskItem[]): Map<string, number> {
  * Displays tasks with hierarchical indentation based on parent/child relationships
  * Wrapped in React.memo to prevent re-renders when only sibling state changes (e.g., detailsViewMode)
  */
-export const LeftPanel = memo(function LeftPanel({ tasks, selectedIndex, width = 45 }: LeftPanelProps & { width?: number }): ReactNode {
+export const LeftPanel = memo(function LeftPanel({
+  tasks,
+  selectedIndex,
+  width = 45,
+  isFocused = true,
+}: LeftPanelProps & { width?: number; isFocused?: boolean }): ReactNode {
   // Calculate max width for task row content (panel width minus padding and border)
   const maxRowWidth = Math.max(20, width - 4);
 
@@ -123,7 +128,7 @@ export const LeftPanel = memo(function LeftPanel({ tasks, selectedIndex, width =
         flexDirection: 'column',
         backgroundColor: colors.bg.primary,
         border: true,
-        borderColor: colors.border.normal,
+        borderColor: isFocused ? colors.accent.primary : colors.border.normal,
       }}
     >
       <scrollbox

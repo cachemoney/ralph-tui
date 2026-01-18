@@ -167,23 +167,6 @@ export interface RightPanelProps {
   agentName?: string;
   /** Model being used (provider/model format) */
   currentModel?: string;
-  /**
-   * Subagent tracing detail level.
-   * Controls how much subagent information is shown:
-   * - 'off': No tracing, use raw output
-   * - 'minimal': Show start/complete events only
-   * - 'moderate': Show events + description + duration (collapsible)
-   * - 'full': Show events + nested output + hierarchy panel
-   */
-  subagentDetailLevel?: SubagentDetailLevel;
-  /** Subagent tree for the current iteration (hierarchical structure) */
-  subagentTree?: SubagentTreeNode[];
-  /** Set of collapsed subagent IDs (for section toggle state) */
-  collapsedSubagents?: Set<string>;
-  /** ID of the currently focused subagent section */
-  focusedSubagentId?: string;
-  /** Callback when a subagent section is toggled */
-  onSubagentToggle?: (id: string) => void;
   /** Rendered prompt content for preview (when viewMode is 'prompt') */
   promptPreview?: string;
   /** Source of the template used for the prompt (e.g., 'tracker:beads', 'builtin:json') */

@@ -8,11 +8,9 @@
 import type { ReactNode } from 'react';
 import { useMemo, useState, useEffect } from 'react';
 import { colors, getTaskStatusColor, getTaskStatusIndicator } from '../theme.js';
-import type { RightPanelProps, DetailsViewMode, IterationTimingInfo, SubagentTreeNode, TaskPriority } from '../types.js';
-import type { SubagentDetailLevel } from '../../config/types.js';
+import type { RightPanelProps, DetailsViewMode, IterationTimingInfo, TaskPriority } from '../types.js';
 import { stripAnsiCodes, type FormattedSegment } from '../../plugins/agents/output-formatting.js';
 import { formatElapsedTime } from '../theme.js';
-import { SubagentSections } from './SubagentSection.js';
 import { parseAgentOutput } from '../output-parser.js';
 
 /**
@@ -642,11 +640,6 @@ function TaskOutputView({
   iterationTiming,
   agentName,
   currentModel,
-  subagentDetailLevel = 'off',
-  subagentTree = [],
-  collapsedSubagents = new Set(),
-  focusedSubagentId,
-  onSubagentToggle,
 }: {
   task: NonNullable<RightPanelProps['selectedTask']>;
   currentIteration: number;
@@ -655,15 +648,9 @@ function TaskOutputView({
   iterationTiming?: IterationTimingInfo;
   agentName?: string;
   currentModel?: string;
-  subagentDetailLevel?: SubagentDetailLevel;
-  subagentTree?: SubagentTreeNode[];
-  collapsedSubagents?: Set<string>;
-  focusedSubagentId?: string;
-  onSubagentToggle?: (id: string) => void;
 }): ReactNode {
   const statusColor = getTaskStatusColor(task.status);
   const statusIndicator = getTaskStatusIndicator(task.status);
-  const hasSubagents = subagentTree.length > 0 && subagentDetailLevel !== 'off';
 
   // Check if we're live streaming
   const isLiveStreaming = iterationTiming?.isRunning === true;
@@ -719,29 +706,6 @@ function TaskOutputView({
 
       {/* Timing summary - shows start/end/duration */}
       <TimingSummary timing={iterationTiming} />
-
-      {/* Subagent sections (when tracing is enabled and subagents exist) */}
-      {hasSubagents && (
-        <box
-          title={`Subagents (${subagentTree.length})`}
-          style={{
-            marginBottom: 1,
-            border: true,
-            borderColor: colors.accent.secondary,
-            backgroundColor: colors.bg.tertiary,
-          }}
-        >
-          <scrollbox style={{ maxHeight: 10, padding: 1 }}>
-            <SubagentSections
-              tree={subagentTree}
-              collapsedSet={collapsedSubagents}
-              focusedId={focusedSubagentId}
-              detailLevel={subagentDetailLevel}
-              onToggle={onSubagentToggle}
-            />
-          </scrollbox>
-        </box>
-      )}
 
       {/* Full-height iteration output */}
       <box
@@ -807,11 +771,6 @@ function TaskDetails({
   iterationTiming,
   agentName,
   currentModel,
-  subagentDetailLevel,
-  subagentTree,
-  collapsedSubagents,
-  focusedSubagentId,
-  onSubagentToggle,
   promptPreview,
   templateSource,
 }: {
@@ -823,11 +782,6 @@ function TaskDetails({
   iterationTiming?: IterationTimingInfo;
   agentName?: string;
   currentModel?: string;
-  subagentDetailLevel?: SubagentDetailLevel;
-  subagentTree?: SubagentTreeNode[];
-  collapsedSubagents?: Set<string>;
-  focusedSubagentId?: string;
-  onSubagentToggle?: (id: string) => void;
   promptPreview?: string;
   templateSource?: string;
 }): ReactNode {
@@ -841,11 +795,6 @@ function TaskDetails({
         iterationTiming={iterationTiming}
         agentName={agentName}
         currentModel={currentModel}
-        subagentDetailLevel={subagentDetailLevel}
-        subagentTree={subagentTree}
-        collapsedSubagents={collapsedSubagents}
-        focusedSubagentId={focusedSubagentId}
-        onSubagentToggle={onSubagentToggle}
       />
     );
   }
@@ -875,23 +824,17 @@ export function RightPanel({
   iterationTiming,
   agentName,
   currentModel,
-  subagentDetailLevel = 'off',
-  subagentTree,
-  collapsedSubagents,
-  focusedSubagentId,
-  onSubagentToggle,
   promptPreview,
   templateSource,
 }: RightPanelProps): ReactNode {
-  // Build title with view mode indicator and subagent level
+  // Build title with view mode indicator
   const modeIndicators: Record<typeof viewMode, string> = {
     details: '[Details]',
     output: '[Output]',
     prompt: '[Prompt]',
   };
   const modeIndicator = modeIndicators[viewMode];
-  const subagentIndicator = subagentDetailLevel !== 'off' ? ` [Trace: ${subagentDetailLevel}]` : '';
-  const title = `Details ${modeIndicator}${subagentIndicator}`;
+  const title = `Details ${modeIndicator}`;
 
   return (
     <box
@@ -916,11 +859,6 @@ export function RightPanel({
           iterationTiming={iterationTiming}
           agentName={agentName}
           currentModel={currentModel}
-          subagentDetailLevel={subagentDetailLevel}
-          subagentTree={subagentTree}
-          collapsedSubagents={collapsedSubagents}
-          focusedSubagentId={focusedSubagentId}
-          onSubagentToggle={onSubagentToggle}
           promptPreview={promptPreview}
           templateSource={templateSource}
         />

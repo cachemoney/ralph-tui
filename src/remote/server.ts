@@ -30,8 +30,18 @@ import type {
   TasksResponseMessage,
   OperationResultMessage,
   EngineEventMessage,
+  TokenRefreshMessage,
+  TokenRefreshResponseMessage,
 } from './types.js';
-import { validateToken, getOrCreateToken } from './token.js';
+import {
+  validateServerToken,
+  validateConnectionToken,
+  issueConnectionToken,
+  refreshConnectionToken,
+  revokeClientTokens,
+  cleanupExpiredTokens,
+  getOrCreateServerToken,
+} from './token.js';
 import { createAuditLogger, type AuditLogger } from './audit.js';
 import type { ExecutionEngine, EngineEvent } from '../engine/index.js';
 import type { TrackerPlugin } from '../plugins/trackers/types.js';
@@ -64,6 +74,12 @@ interface ClientState {
 
   /** Event types to forward (empty means all) */
   subscribedEventTypes?: string[];
+
+  /** US-6: Connection token issued to this client */
+  connectionToken?: string;
+
+  /** US-6: When the connection token expires (ISO 8601) */
+  connectionTokenExpiresAt?: string;
 }
 
 /**
@@ -124,6 +140,7 @@ function createMessage<T extends WSMessage>(type: T['type'], data: Omit<T, 'type
 /**
  * RemoteServer class for handling WebSocket connections.
  * US-4: Supports full remote control via engine integration.
+ * US-6: Manages connection token lifecycle (issue, refresh, revoke, cleanup).
  */
 export class RemoteServer {
   private server: Server<WebSocketData> | null = null;
@@ -133,6 +150,8 @@ export class RemoteServer {
   private startedAt: string | null = null;
   /** Engine event listener unsubscribe function */
   private engineUnsubscribe: (() => void) | null = null;
+  /** Token cleanup interval */
+  private tokenCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: RemoteServerOptions) {
     this.options = options;
@@ -212,6 +231,7 @@ export class RemoteServer {
     const host = this.options.hasToken ? '0.0.0.0' : '127.0.0.1';
 
     // Store reference to this for use in websocket handlers
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     const self = this;
 
     // Create WebSocket handler
@@ -245,10 +265,11 @@ export class RemoteServer {
       close(ws: ServerWebSocket<WebSocketData>) {
         const clientState = self.clients.get(ws);
         if (clientState) {
-          self.auditLogger.logConnection(
-            `${clientState.id}@${clientState.ip}`,
-            'disconnect'
-          );
+          // Revoke any connection tokens for this client
+          const clientId = `${clientState.id}@${clientState.ip}`;
+          revokeClientTokens(clientId);
+
+          self.auditLogger.logConnection(clientId, 'disconnect');
           self.options.onDisconnect?.(clientState.id);
           self.clients.delete(ws);
         }
@@ -297,6 +318,11 @@ export class RemoteServer {
       pid: process.pid,
     });
 
+    // Start periodic cleanup of expired connection tokens (every 5 minutes)
+    this.tokenCleanupInterval = setInterval(() => {
+      cleanupExpiredTokens();
+    }, 5 * 60 * 1000);
+
     this.options.onStart?.(state);
     return state;
   }
@@ -307,6 +333,12 @@ export class RemoteServer {
   async stop(): Promise<void> {
     if (!this.server) {
       return;
+    }
+
+    // Stop token cleanup interval
+    if (this.tokenCleanupInterval) {
+      clearInterval(this.tokenCleanupInterval);
+      this.tokenCleanupInterval = null;
     }
 
     // Unsubscribe from engine events
@@ -436,6 +468,11 @@ export class RemoteServer {
         break;
       case 'continue':
         this.handleContinue(ws, message as ContinueMessage);
+        break;
+
+      // US-6: Token management
+      case 'token_refresh':
+        this.handleTokenRefresh(ws, clientState, message as TokenRefreshMessage);
         break;
 
       default:
@@ -742,6 +779,8 @@ export class RemoteServer {
 
   /**
    * Handle authentication request.
+   * Supports both server token (initial auth) and connection token (re-auth).
+   * On successful server token auth, issues a short-lived connection token.
    */
   private async handleAuth(
     ws: ServerWebSocket<WebSocketData>,
@@ -749,26 +788,116 @@ export class RemoteServer {
     message: AuthMessage
   ): Promise<void> {
     const clientId = `${clientState.id}@${clientState.ip}`;
+    const tokenType = message.tokenType ?? 'server';
 
-    const isValid = await validateToken(message.token);
+    if (tokenType === 'connection') {
+      // Re-auth with existing connection token
+      const validation = validateConnectionToken(message.token);
 
-    if (isValid) {
-      clientState.authenticated = true;
+      if (validation.valid) {
+        clientState.authenticated = true;
+        clientState.connectionToken = message.token;
 
-      const response = createMessage<AuthResponseMessage>('auth_response', {
-        success: true,
-      });
-      this.send(ws, response);
+        const response = createMessage<AuthResponseMessage>('auth_response', {
+          success: true,
+        });
+        this.send(ws, response);
 
-      await this.auditLogger.logAuth(clientId, true);
+        await this.auditLogger.logAuth(clientId, true, undefined, { tokenType: 'connection' });
+      } else {
+        // Connection token invalid/expired - client should re-auth with server token
+        const response = createMessage<AuthResponseMessage>('auth_response', {
+          success: false,
+          error: validation.error ?? 'Connection token invalid',
+        });
+        this.send(ws, response);
+
+        await this.auditLogger.logAuth(clientId, false, validation.error ?? 'Connection token invalid');
+      }
     } else {
-      const response = createMessage<AuthResponseMessage>('auth_response', {
+      // Initial auth with server token
+      const validation = await validateServerToken(message.token);
+
+      if (validation.valid) {
+        clientState.authenticated = true;
+
+        // Issue a short-lived connection token
+        const connToken = issueConnectionToken(clientId);
+        clientState.connectionToken = connToken.value;
+        clientState.connectionTokenExpiresAt = connToken.expiresAt;
+
+        const response = createMessage<AuthResponseMessage>('auth_response', {
+          success: true,
+          connectionToken: connToken.value,
+          connectionTokenExpiresAt: connToken.expiresAt,
+        });
+        this.send(ws, response);
+
+        await this.auditLogger.logAuth(clientId, true, undefined, { tokenType: 'server' });
+      } else {
+        const response = createMessage<AuthResponseMessage>('auth_response', {
+          success: false,
+          error: validation.error ?? 'Invalid token',
+        });
+        this.send(ws, response);
+
+        await this.auditLogger.logAuth(
+          clientId,
+          false,
+          validation.error ?? 'Invalid token',
+          { expired: validation.expired }
+        );
+      }
+    }
+  }
+
+  /**
+   * Handle token refresh request.
+   * Issues a new connection token if the current one is still valid.
+   */
+  private handleTokenRefresh(
+    ws: ServerWebSocket<WebSocketData>,
+    clientState: ClientState,
+    message: TokenRefreshMessage
+  ): void {
+    const clientId = `${clientState.id}@${clientState.ip}`;
+
+    // Verify the provided token matches what we have for this client
+    if (message.connectionToken !== clientState.connectionToken) {
+      const response = createMessage<TokenRefreshResponseMessage>('token_refresh_response', {
         success: false,
-        error: 'Invalid token',
+        error: 'Connection token mismatch',
       });
+      response.id = message.id;
+      this.send(ws, response);
+      return;
+    }
+
+    // Refresh the token
+    const newToken = refreshConnectionToken(message.connectionToken);
+
+    if (newToken) {
+      clientState.connectionToken = newToken.value;
+      clientState.connectionTokenExpiresAt = newToken.expiresAt;
+
+      const response = createMessage<TokenRefreshResponseMessage>('token_refresh_response', {
+        success: true,
+        connectionToken: newToken.value,
+        connectionTokenExpiresAt: newToken.expiresAt,
+      });
+      response.id = message.id;
       this.send(ws, response);
 
-      await this.auditLogger.logAuth(clientId, false, 'Invalid token');
+      this.auditLogger.logAction(clientId, 'token_refresh', true);
+    } else {
+      const response = createMessage<TokenRefreshResponseMessage>('token_refresh_response', {
+        success: false,
+        error: 'Token refresh failed',
+      });
+      response.id = message.id;
+      this.send(ws, response);
+
+      this.auditLogger.logAction(clientId, 'token_refresh', false, 'Token refresh failed');
     }
   }
 
@@ -827,9 +956,9 @@ export class RemoteServer {
 export async function createRemoteServer(
   options: Partial<RemoteServerOptions> = {}
 ): Promise<RemoteServer> {
-  // Check if token exists
-  const { token, isNew } = await getOrCreateToken();
-  const hasToken = !isNew || token.length > 0;
+  // Check if token exists and is valid
+  const { token, isNew } = await getOrCreateServerToken();
+  const hasToken = !isNew || token.value.length > 0;
 
   const serverOptions: RemoteServerOptions = {
     port: options.port ?? 7890,

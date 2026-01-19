@@ -10,13 +10,13 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import {
   createRemoteServer,
-  getOrCreateToken,
-  rotateToken,
-  getTokenInfo,
+  getOrCreateServerToken,
+  rotateServerToken,
+  getServerTokenInfo,
   type RemoteServerState,
 } from '../remote/index.js';
-import type { ListenOptions } from '../remote/types.js';
-import { DEFAULT_LISTEN_OPTIONS } from '../remote/types.js';
+import type { ListenOptions, ServerToken } from '../remote/types.js';
+import { DEFAULT_LISTEN_OPTIONS, TOKEN_LIFETIMES } from '../remote/types.js';
 
 /**
  * Path to the daemon PID file
@@ -54,26 +54,54 @@ export function parseListenArgs(args: string[]): Partial<ListenOptions> & { help
 }
 
 /**
- * Display token information.
+ * Format a date for display.
  */
-async function displayToken(token: string, isNew: boolean): Promise<void> {
+function formatDate(isoDate: string): string {
+  return new Date(isoDate).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+/**
+ * Display token information.
+ * Token is only shown in full when newly generated.
+ */
+async function displayToken(token: ServerToken, isNew: boolean): Promise<void> {
   console.log('');
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log('                    Authentication Token                        ');
+  console.log('                   Server Authentication Token                  ');
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('');
 
   if (isNew) {
-    console.log('  A new authentication token has been generated:');
+    console.log('  A new server token has been generated:');
+    console.log('');
+    console.log(`  ${token.value}`);
+    console.log('');
+    console.log('  ⚠️  IMPORTANT: This token is shown only once. Save it securely.');
+    console.log('     You will need it to connect remote clients to this instance.');
   } else {
-    console.log('  Your authentication token:');
+    console.log('  Using existing server token (use --rotate-token to generate new)');
+    console.log('');
+    console.log(`  Preview: ${token.value.slice(0, 8)}...`);
   }
 
   console.log('');
-  console.log(`  ${token}`);
-  console.log('');
-  console.log('  Store this token securely. You will need it to connect');
-  console.log('  remote clients to this instance.');
+  console.log('  Token Details:');
+  console.log(`    Version:  ${token.version}`);
+  console.log(`    Created:  ${formatDate(token.createdAt)}`);
+  console.log(`    Expires:  ${formatDate(token.expiresAt)}`);
+
+  const expiresAt = new Date(token.expiresAt);
+  const daysRemaining = Math.ceil((expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  if (daysRemaining <= 7) {
+    console.log(`    ⚠️  Expires in ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''}!`);
+  } else {
+    console.log(`    Lifetime: ${TOKEN_LIFETIMES.SERVER_TOKEN_DAYS} days`);
+  }
+
   console.log('');
 
   if (isNew) {
@@ -165,14 +193,25 @@ export async function executeListenCommand(args: string[]): Promise<void> {
 
   // Handle token rotation
   if (options.rotateToken) {
-    const newToken = await rotateToken();
+    const newToken = await rotateServerToken();
     console.log('');
-    console.log('Token rotated successfully!');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('                      Token Rotated Successfully                ');
+    console.log('═══════════════════════════════════════════════════════════════');
     console.log('');
-    console.log('New token:');
-    console.log(`  ${newToken}`);
+    console.log('  New server token (save this securely):');
     console.log('');
-    console.log('All existing connections using the old token will be rejected.');
+    console.log(`  ${newToken.value}`);
+    console.log('');
+    console.log('  Token Details:');
+    console.log(`    Version:  ${newToken.version}`);
+    console.log(`    Created:  ${formatDate(newToken.createdAt)}`);
+    console.log(`    Expires:  ${formatDate(newToken.expiresAt)}`);
+    console.log('');
+    console.log('  ⚠️  All existing connections using the old token will be rejected.');
+    console.log('     This token is shown only once. Save it now.');
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════════');
     console.log('');
     return;
   }
@@ -193,17 +232,20 @@ export async function executeListenCommand(args: string[]): Promise<void> {
   }
 
   // Get or create token
-  const { token, isNew } = await getOrCreateToken();
+  const { token, isNew } = await getOrCreateServerToken();
 
   // Display token on first run (not in daemon mode)
   if (isNew && !isDaemon) {
     await displayToken(token, true);
   } else if (!isDaemon) {
-    // Show token preview
-    const tokenInfo = await getTokenInfo();
+    // Show token preview with expiration info
+    const tokenInfo = await getServerTokenInfo();
     if (tokenInfo.exists) {
       console.log('');
       console.log(`Using token: ${tokenInfo.preview} (v${tokenInfo.version})`);
+      if (tokenInfo.daysRemaining !== undefined && tokenInfo.daysRemaining <= 7) {
+        console.log(`  ⚠️  Token expires in ${tokenInfo.daysRemaining} day${tokenInfo.daysRemaining !== 1 ? 's' : ''}!`);
+      }
     }
   }
 

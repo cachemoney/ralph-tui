@@ -26,7 +26,10 @@ import type {
   OperationResultMessage,
   EngineEventMessage,
   RemoteEngineState,
+  TokenRefreshMessage,
+  TokenRefreshResponseMessage,
 } from './types.js';
+import { TOKEN_LIFETIMES } from './types.js';
 import type { TrackerTask } from '../plugins/trackers/types.js';
 import type { EngineEvent } from '../engine/types.js';
 
@@ -128,7 +131,8 @@ export type RemoteClientEvent =
   | { type: 'reconnect_failed'; attempts: number; error: string }
   | { type: 'metrics_updated'; metrics: ConnectionMetrics }
   | { type: 'message'; message: WSMessage }
-  | { type: 'engine_event'; event: EngineEvent };
+  | { type: 'engine_event'; event: EngineEvent }
+  | { type: 'token_refreshed'; expiresAt: string };
 
 /**
  * Callback for remote client events
@@ -149,12 +153,14 @@ interface PendingRequest<T> {
  * Handles authentication, message passing, and full remote control.
  * US-4: Extended with request/response correlation and engine control methods.
  * US-5: Extended with auto-reconnect and connection metrics.
+ * US-6: Extended with two-tier token system (server token for initial auth, connection token for session).
  */
 export class RemoteClient {
   private ws: WebSocket | null = null;
   private host: string;
   private port: number;
-  private token: string;
+  /** Server token for initial authentication (long-lived, 90 days) */
+  private serverToken: string;
   private eventHandler: RemoteClientEventHandler;
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private _status: ConnectionStatus = 'disconnected';
@@ -164,6 +170,14 @@ export class RemoteClient {
   private _subscribed = false;
   /** Request timeout in milliseconds */
   private requestTimeout = 30000;
+
+  // US-6: Connection token management
+  /** Connection token issued by server (short-lived, 24 hours) */
+  private connectionToken: string | null = null;
+  /** When the connection token expires (ISO 8601) */
+  private connectionTokenExpiresAt: string | null = null;
+  /** Timer for proactive token refresh */
+  private tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   // US-5: Reconnection state
   private reconnectConfig: ReconnectConfig;
@@ -186,7 +200,7 @@ export class RemoteClient {
   ) {
     this.host = host;
     this.port = port;
-    this.token = token;
+    this.serverToken = token;
     this.eventHandler = eventHandler;
     this.reconnectConfig = { ...DEFAULT_RECONNECT_CONFIG, ...reconnectConfig };
   }
@@ -304,14 +318,17 @@ export class RemoteClient {
   }
 
   /**
-   * Send authentication message
+   * Send authentication message.
+   * Uses connection token if available (for re-auth), otherwise uses server token.
    */
   private authenticate(): void {
+    const useConnectionToken = this.connectionToken !== null;
     const authMessage: AuthMessage = {
       type: 'auth',
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
-      token: this.token,
+      token: useConnectionToken ? this.connectionToken! : this.serverToken,
+      tokenType: useConnectionToken ? 'connection' : 'server',
     };
     this.ws?.send(JSON.stringify(authMessage));
   }
@@ -340,6 +357,13 @@ export class RemoteClient {
           const wasReconnecting = this._status === 'reconnecting';
           this._status = 'connected';
 
+          // US-6: Store connection token if provided (server token auth response)
+          if (authResponse.connectionToken && authResponse.connectionTokenExpiresAt) {
+            this.connectionToken = authResponse.connectionToken;
+            this.connectionTokenExpiresAt = authResponse.connectionTokenExpiresAt;
+            this.scheduleTokenRefresh();
+          }
+
           // Track connection metrics
           this._connectedAt = new Date().toISOString();
           this.startMetricsInterval();
@@ -355,12 +379,35 @@ export class RemoteClient {
           this.startPingInterval();
           resolveConnect();
         } else {
+          // Auth failed - if using connection token, it may have expired
+          // Clear it so next attempt uses server token
+          if (this.connectionToken) {
+            this.connectionToken = null;
+            this.connectionTokenExpiresAt = null;
+          }
           this._status = 'disconnected';
           const error = authResponse.error ?? 'Authentication failed';
           this.eventHandler({ type: 'disconnected', error });
           this.cleanup();
           rejectConnect(new Error(error));
         }
+        break;
+      }
+
+      case 'token_refresh_response': {
+        // US-6: Handle token refresh response
+        const refreshResponse = message as TokenRefreshResponseMessage;
+        if (refreshResponse.success && refreshResponse.connectionToken) {
+          this.connectionToken = refreshResponse.connectionToken;
+          this.connectionTokenExpiresAt = refreshResponse.connectionTokenExpiresAt ?? null;
+          this.scheduleTokenRefresh();
+          this.eventHandler({
+            type: 'token_refreshed',
+            expiresAt: refreshResponse.connectionTokenExpiresAt ?? '',
+          });
+        }
+        // If refresh fails, we'll continue with the current token until it expires
+        // Then reconnect with server token
         break;
       }
 
@@ -611,16 +658,74 @@ export class RemoteClient {
     }
   }
 
+  // ============================================================================
+  // US-6: Token Refresh Methods
+  // ============================================================================
+
+  /**
+   * Schedule proactive token refresh before expiration.
+   * Refreshes when REFRESH_THRESHOLD_HOURS remain before expiration.
+   */
+  private scheduleTokenRefresh(): void {
+    this.clearTokenRefreshTimer();
+
+    if (!this.connectionTokenExpiresAt) {
+      return;
+    }
+
+    const expiresAt = new Date(this.connectionTokenExpiresAt).getTime();
+    const refreshThreshold = TOKEN_LIFETIMES.REFRESH_THRESHOLD_HOURS * 60 * 60 * 1000;
+    const refreshTime = expiresAt - refreshThreshold;
+    const delay = Math.max(0, refreshTime - Date.now());
+
+    // Only schedule if expiration is in the future
+    if (expiresAt > Date.now()) {
+      this.tokenRefreshTimer = setTimeout(() => {
+        this.requestTokenRefresh();
+      }, delay);
+    }
+  }
+
+  /**
+   * Request a token refresh from the server.
+   */
+  private requestTokenRefresh(): void {
+    if (!this.connectionToken || this._status !== 'connected' || !this.ws) {
+      return;
+    }
+
+    const refreshMessage: TokenRefreshMessage = {
+      type: 'token_refresh',
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      connectionToken: this.connectionToken,
+    };
+
+    this.ws.send(JSON.stringify(refreshMessage));
+  }
+
+  /**
+   * Clear the token refresh timer.
+   */
+  private clearTokenRefreshTimer(): void {
+    if (this.tokenRefreshTimer) {
+      clearTimeout(this.tokenRefreshTimer);
+      this.tokenRefreshTimer = null;
+    }
+  }
+
   /**
    * Clean up resources (full cleanup including reconnection state).
    */
   private cleanup(): void {
     this.cleanupConnection();
     this.clearReconnectTimer();
+    this.clearTokenRefreshTimer();
     this.stopMetricsInterval();
     this.reconnectAttempts = 0;
     this._connectedAt = null;
     this._latencyMs = null;
+    // Keep connection token for potential reconnect attempts
   }
 
   /**
@@ -629,6 +734,7 @@ export class RemoteClient {
    */
   private cleanupConnection(): void {
     this.stopPingInterval();
+    this.clearTokenRefreshTimer();
     // Reject all pending requests
     for (const [id, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);

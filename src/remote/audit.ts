@@ -89,13 +89,36 @@ export class AuditLogger {
   /**
    * Log an authentication attempt.
    */
-  async logAuth(clientId: string, success: boolean, error?: string): Promise<void> {
+  async logAuth(
+    clientId: string,
+    success: boolean,
+    error?: string,
+    details?: Record<string, unknown>
+  ): Promise<void> {
     if (success) {
-      await this.logSuccess(clientId, 'auth', { type: 'token_auth' });
+      await this.logSuccess(clientId, 'auth', { type: 'token_auth', ...details });
     } else {
       await this.logFailure(clientId, 'auth', error ?? 'Authentication failed', {
         type: 'token_auth',
+        ...details,
       });
+    }
+  }
+
+  /**
+   * Log a generic action (convenience wrapper).
+   */
+  async logAction(
+    clientId: string,
+    action: string,
+    success: boolean,
+    error?: string,
+    details?: Record<string, unknown>
+  ): Promise<void> {
+    if (success) {
+      await this.logSuccess(clientId, action, details);
+    } else {
+      await this.logFailure(clientId, action, error ?? 'Action failed', details);
     }
   }
 

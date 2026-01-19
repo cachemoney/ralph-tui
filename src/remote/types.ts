@@ -4,18 +4,68 @@
  */
 
 /**
+ * Server token stored in ~/.config/ralph-tui/remote.json
+ * Long-lived (default 90 days), used to authenticate and obtain connection tokens.
+ */
+export interface ServerToken {
+  /** The server token value */
+  value: string;
+
+  /** When the token was created (ISO 8601) */
+  createdAt: string;
+
+  /** When the token expires (ISO 8601) */
+  expiresAt: string;
+
+  /** Token version for tracking rotation */
+  version: number;
+}
+
+/**
+ * Connection token issued to authenticated clients.
+ * Short-lived (default 24 hours), auto-refreshed while connected.
+ */
+export interface ConnectionToken {
+  /** The connection token value */
+  value: string;
+
+  /** When the token was created (ISO 8601) */
+  createdAt: string;
+
+  /** When the token expires (ISO 8601) */
+  expiresAt: string;
+
+  /** Client identifier this token was issued to */
+  clientId: string;
+}
+
+/**
  * Remote listener configuration stored in ~/.config/ralph-tui/remote.json
  */
 export interface RemoteConfig {
-  /** Authentication token (generated on first run) */
-  token: string;
+  /** Server authentication token (long-lived, 90 days default) */
+  serverToken: ServerToken;
 
-  /** When the token was created (ISO 8601) */
-  tokenCreatedAt: string;
-
-  /** Token version for tracking rotation */
-  tokenVersion: number;
+  // Legacy fields for backwards compatibility (will be migrated)
+  /** @deprecated Use serverToken.value instead */
+  token?: string;
+  /** @deprecated Use serverToken.createdAt instead */
+  tokenCreatedAt?: string;
+  /** @deprecated Use serverToken.version instead */
+  tokenVersion?: number;
 }
+
+/**
+ * Token lifetime configuration
+ */
+export const TOKEN_LIFETIMES = {
+  /** Server token lifetime in days (90 days default) */
+  SERVER_TOKEN_DAYS: 90,
+  /** Connection token lifetime in hours (24 hours default) */
+  CONNECTION_TOKEN_HOURS: 24,
+  /** Token refresh threshold - refresh when less than this many hours remain */
+  REFRESH_THRESHOLD_HOURS: 1,
+} as const;
 
 /**
  * Options for the listen command
@@ -55,20 +105,53 @@ export interface WSMessage {
 }
 
 /**
- * Authentication request sent by client
+ * Authentication request sent by client.
+ * Supports both server token (initial auth) and connection token (re-auth).
  */
 export interface AuthMessage extends WSMessage {
   type: 'auth';
+  /** Token value (either server token or connection token) */
   token: string;
+  /** Token type: 'server' for initial auth, 'connection' for re-auth */
+  tokenType?: 'server' | 'connection';
 }
 
 /**
- * Authentication response sent by server
+ * Authentication response sent by server.
+ * On successful auth with server token, includes a connection token.
  */
 export interface AuthResponseMessage extends WSMessage {
   type: 'auth_response';
   success: boolean;
   error?: string;
+  /** Connection token issued on successful server token auth */
+  connectionToken?: string;
+  /** When the connection token expires (ISO 8601) */
+  connectionTokenExpiresAt?: string;
+}
+
+/**
+ * Token refresh request sent by client.
+ * Client should request refresh when connection token is near expiration.
+ */
+export interface TokenRefreshMessage extends WSMessage {
+  type: 'token_refresh';
+  /** Current connection token (for validation) */
+  connectionToken: string;
+}
+
+/**
+ * Token refresh response sent by server.
+ * Issues a new connection token if the current one is still valid.
+ */
+export interface TokenRefreshResponseMessage extends WSMessage {
+  type: 'token_refresh_response';
+  success: boolean;
+  error?: string;
+  /** New connection token */
+  connectionToken?: string;
+  /** When the new connection token expires (ISO 8601) */
+  connectionTokenExpiresAt?: string;
 }
 
 /**
@@ -107,6 +190,8 @@ export interface PongMessage extends WSMessage {
 export type WSMessageType =
   | AuthMessage
   | AuthResponseMessage
+  | TokenRefreshMessage
+  | TokenRefreshResponseMessage
   | ServerStatusMessage
   | ErrorMessage
   | PingMessage

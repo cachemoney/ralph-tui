@@ -52,6 +52,12 @@ describe('KiroAgentPlugin', () => {
     test('has no structured output format', () => {
       expect(plugin.meta.structuredOutputFormat).toBeUndefined();
     });
+
+    test('has correct skillsPaths', () => {
+      expect(plugin.meta.skillsPaths).toBeDefined();
+      expect(plugin.meta.skillsPaths?.personal).toBe('~/.kiro/skills');
+      expect(plugin.meta.skillsPaths?.repo).toBe('.kiro/skills');
+    });
   });
 
   describe('initialization', () => {

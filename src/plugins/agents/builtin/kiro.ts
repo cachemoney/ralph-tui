@@ -33,9 +33,11 @@ export class KiroAgentPlugin extends BaseAgentPlugin {
     supportsFileContext: false,
     supportsSubagentTracing: false, // Text output only, no structured tracing
     structuredOutputFormat: undefined,
+    // Kiro CLI supports skills in ~/.kiro/skills/ (personal) and .kiro/skills/ (repo)
+    // Note: Kiro also has "Powers" (~/.kiro/powers/) which are similar but use POWER.md format
     skillsPaths: {
       personal: '~/.kiro/skills',
-      repo: '.kiro',
+      repo: '.kiro/skills',
     },
   };
 

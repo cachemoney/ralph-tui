@@ -23,6 +23,8 @@ import {
   resetTheme,
   loadThemeFile,
   isValidHexColor,
+  resolveThemePath,
+  BUNDLED_THEMES,
   type RalphStatus,
   type TaskStatus,
   type ThemeColors,
@@ -754,6 +756,156 @@ describe('theme', () => {
       resetTheme();
 
       expect(colors.bg.primary).toBe(defaultColors.bg.primary);
+    });
+  });
+
+  describe('BUNDLED_THEMES', () => {
+    test('should contain expected bundled theme names', () => {
+      expect(BUNDLED_THEMES).toContain('bright');
+      expect(BUNDLED_THEMES).toContain('catppuccin');
+      expect(BUNDLED_THEMES).toContain('dracula');
+      expect(BUNDLED_THEMES).toContain('high-contrast');
+      expect(BUNDLED_THEMES).toContain('solarized-light');
+    });
+
+    test('should have exactly 5 bundled themes', () => {
+      expect(BUNDLED_THEMES.length).toBe(5);
+    });
+
+    test('should be a readonly array', () => {
+      // TypeScript enforces this at compile time, but we can verify it's an array
+      expect(Array.isArray(BUNDLED_THEMES)).toBe(true);
+    });
+  });
+
+  describe('resolveThemePath', () => {
+    test('resolves simple theme name to bundled theme path', () => {
+      const result = resolveThemePath('dracula');
+
+      expect(result).toContain('assets');
+      expect(result).toContain('themes');
+      expect(result).toEndWith('dracula.json');
+    });
+
+    test('resolves all bundled theme names correctly', () => {
+      for (const themeName of BUNDLED_THEMES) {
+        const result = resolveThemePath(themeName);
+        expect(result).toEndWith(`${themeName}.json`);
+        expect(result).toContain('themes');
+      }
+    });
+
+    test('treats path with forward slash as file path', () => {
+      const result = resolveThemePath('./my-theme.json');
+
+      expect(result).not.toContain('assets/themes');
+      expect(result).toEndWith('my-theme.json');
+    });
+
+    test('treats path with backslash as file path (Windows)', () => {
+      const result = resolveThemePath('.\\my-theme.json');
+
+      expect(result).not.toContain('assets/themes');
+      expect(result).toEndWith('my-theme.json');
+    });
+
+    test('treats path ending with .json as file path', () => {
+      const result = resolveThemePath('custom-theme.json');
+
+      // Even without slashes, .json suffix means it's a file path
+      expect(result).not.toContain('assets/themes');
+      expect(result).toEndWith('custom-theme.json');
+    });
+
+    test('treats absolute path as file path', () => {
+      const absolutePath = '/home/user/themes/my-theme.json';
+      const result = resolveThemePath(absolutePath);
+
+      expect(result).toBe(absolutePath);
+    });
+
+    test('resolves relative path from cwd', () => {
+      const relativePath = 'themes/custom.json';
+      const result = resolveThemePath(relativePath);
+
+      expect(result).toContain(process.cwd());
+      expect(result).toEndWith('themes/custom.json');
+    });
+  });
+
+  describe('loadThemeFile with bundled themes', () => {
+    beforeEach(() => {
+      resetTheme();
+    });
+
+    afterEach(() => {
+      resetTheme();
+    });
+
+    test('loads dracula theme by name', async () => {
+      const theme = await loadThemeFile('dracula');
+
+      expect(theme).toBeDefined();
+      expect(theme.bg.primary).toBe('#282a36'); // Dracula background
+      expect(theme.accent.primary).toBe('#bd93f9'); // Dracula purple
+    });
+
+    test('loads catppuccin theme by name', async () => {
+      const theme = await loadThemeFile('catppuccin');
+
+      expect(theme).toBeDefined();
+      expect(theme.bg.primary).toBe('#1e1e2e'); // Catppuccin Mocha base
+      expect(theme.accent.primary).toBe('#89b4fa'); // Catppuccin blue
+    });
+
+    test('loads solarized-light theme by name', async () => {
+      const theme = await loadThemeFile('solarized-light');
+
+      expect(theme).toBeDefined();
+      expect(theme.bg.primary).toBe('#fdf6e3'); // Solarized light base03
+      expect(theme.accent.primary).toBe('#268bd2'); // Solarized blue
+    });
+
+    test('loads high-contrast theme by name', async () => {
+      const theme = await loadThemeFile('high-contrast');
+
+      expect(theme).toBeDefined();
+      expect(theme.bg.primary).toBe('#0a0a0f');
+      expect(theme.fg.primary).toBe('#ffffff');
+    });
+
+    test('loads bright theme by name', async () => {
+      const theme = await loadThemeFile('bright');
+
+      expect(theme).toBeDefined();
+      expect(theme.bg.primary).toBe('#1a0a2e');
+    });
+
+    test('throws error for non-existent bundled theme name', async () => {
+      await expect(loadThemeFile('nonexistent-theme')).rejects.toThrow('Theme file not found');
+    });
+  });
+
+  describe('initializeTheme with bundled themes', () => {
+    beforeEach(() => {
+      resetTheme();
+    });
+
+    afterEach(() => {
+      resetTheme();
+    });
+
+    test('initializes with dracula theme by name', async () => {
+      await initializeTheme('dracula');
+
+      expect(colors.bg.primary).toBe('#282a36');
+      expect(colors.accent.primary).toBe('#bd93f9');
+    });
+
+    test('initializes with catppuccin theme by name', async () => {
+      await initializeTheme('catppuccin');
+
+      expect(colors.bg.primary).toBe('#1e1e2e');
     });
   });
 });

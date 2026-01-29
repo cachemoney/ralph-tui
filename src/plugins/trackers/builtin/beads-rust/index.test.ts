@@ -89,7 +89,7 @@ describe('BeadsRustTrackerPlugin', () => {
       },
     }));
 
-    // Now import the module - it will get the mocked versions
+    // Import the module so it uses the mocked versions
     const module = await import('./index.js');
     BeadsRustTrackerPlugin = module.BeadsRustTrackerPlugin;
   });

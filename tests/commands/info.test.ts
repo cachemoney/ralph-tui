@@ -56,7 +56,7 @@ describe('collectSystemInfo', () => {
     const { registerBuiltinAgents } = await import('../../src/plugins/agents/builtin/index.js')
     registerBuiltinAgents()
 
-    // Now import collectSystemInfo - it will use the fresh registry
+    // Import collectSystemInfo so it uses the fresh registry
     const infoModule = await import('../../src/commands/info.js')
     collectSystemInfo = infoModule.collectSystemInfo
   })

@@ -43,7 +43,7 @@ beforeAll(async () => {
     AGENT_ID_MAP: realSkillInstaller.AGENT_ID_MAP,
   }));
 
-  // Now import the skills module - it will get our mock (which uses real functions)
+  // Import the skills module so it uses our mock (which uses real functions)
   // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
   const skillsModule = await import('./skills.js?test-reload') as typeof import('./skills.js');
   executeSkillsCommand = skillsModule.executeSkillsCommand;

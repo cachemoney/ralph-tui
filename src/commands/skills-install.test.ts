@@ -79,7 +79,7 @@ describe('skills install command (spawn)', () => {
       },
     }));
 
-    // Now import the skills module - it will get both our mocks
+    // Import the skills module so it uses both our mocks
     // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
     const module = await import('./skills.js?test-reload-install') as typeof import('./skills.js');
     executeSkillsCommand = module.executeSkillsCommand;

@@ -70,6 +70,17 @@ async function readConfig(dir: string): Promise<Record<string, string>> {
 
 // Set up mocks and import module before all tests
 beforeAll(async () => {
+  // CRITICAL: Mock ../config/index.js with the REAL implementations.
+  // migration-install.test.ts mocks this at module level with hardcoded values,
+  // which pollutes the cache. We need to re-export the real functions.
+  // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+  const realConfig = await import('../config/index.js?test-reload') as typeof import('../config/index.js');
+  mock.module('../config/index.js', () => ({
+    loadProjectConfigOnly: realConfig.loadProjectConfigOnly,
+    saveProjectConfig: realConfig.saveProjectConfig,
+    getProjectConfigPath: realConfig.getProjectConfigPath,
+  }));
+
   // Mock skill-installer to avoid actually spawning processes during migration
   mock.module('./skill-installer.js', () => ({
     installViaAddSkill: () => Promise.resolve({ success: true, output: '' }),
@@ -108,7 +119,10 @@ beforeAll(async () => {
   }));
 
   // Dynamic import after mocks are set up
-  const migrationModule = await import('./migration.js');
+  // Use ?test-reload to force a fresh module instance, avoiding pollution from
+  // migration-install.test.ts which uses module-level mock.module()
+  // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+  const migrationModule = await import('./migration.js?test-reload') as typeof import('./migration.js');
   needsMigration = migrationModule.needsMigration;
   migrateConfig = migrationModule.migrateConfig;
   checkAndMigrate = migrationModule.checkAndMigrate;

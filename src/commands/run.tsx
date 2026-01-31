@@ -1425,7 +1425,11 @@ async function runParallelWithTui(
         // Track tasks that the worker marked as completed (agent said COMPLETED)
         // These will be marked as "completedLocally" if merge subsequently fails
         if (event.result.taskCompleted) {
-          parallelState.completedLocallyTaskIds.add(event.result.task.id);
+          // Create new Set so React detects the change (Set mutation doesn't change reference)
+          parallelState.completedLocallyTaskIds = new Set([
+            ...parallelState.completedLocallyTaskIds,
+            event.result.task.id,
+          ]);
         }
         break;
 
@@ -1447,7 +1451,10 @@ async function runParallelWithTui(
         // Refresh merge queue from executor state
         parallelState.mergeQueue = [...parallelExecutor.getState().mergeQueue];
         // Task successfully merged — remove from completedLocally set (it's now fully done)
-        parallelState.completedLocallyTaskIds.delete(event.taskId);
+        // Create new Set so React detects the change
+        const newSet = new Set(parallelState.completedLocallyTaskIds);
+        newSet.delete(event.taskId);
+        parallelState.completedLocallyTaskIds = newSet;
         break;
 
       case 'merge:failed':
@@ -1510,7 +1517,11 @@ async function runParallelWithTui(
   // This provides early warning when files are gitignored and won't be committed.
   parallelExecutor.onEngineEvent((event) => {
     if (event.type === 'task:auto-commit-skipped') {
-      parallelState.autoCommitSkippedTaskIds.add(event.task.id);
+      // Create new Set so React detects the change
+      parallelState.autoCommitSkippedTaskIds = new Set([
+        ...parallelState.autoCommitSkippedTaskIds,
+        event.task.id,
+      ]);
       triggerRerender?.();
     }
   });

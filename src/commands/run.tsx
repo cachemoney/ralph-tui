@@ -1433,11 +1433,15 @@ async function runParallelWithTui(
 
       case 'worker:output':
         // Append output to the worker's output buffer
+        // Replace the Map instance so downstream memos observe the change
         if (event.stream === 'stdout' && event.data.trim()) {
           const existing = parallelState.workerOutputs.get(event.workerId) ?? [];
           // Keep last 500 lines per worker to prevent memory bloat
           const lines = [...existing, ...event.data.split('\n').filter((l: string) => l.trim())];
-          parallelState.workerOutputs.set(event.workerId, lines.slice(-500));
+          // Create new Map from existing entries, then set the updated lines
+          const newMap = new Map(parallelState.workerOutputs);
+          newMap.set(event.workerId, lines.slice(-500));
+          parallelState.workerOutputs = newMap;
         }
         break;
 
@@ -2501,6 +2505,9 @@ export async function executeRunCommand(args: string[]): Promise<void> {
     }
   }
 
+  // Track parallel completion state for final check (set inside useParallel block)
+  let parallelAllComplete: boolean | null = null;
+
   // Run parallel or sequential execution
   try {
     if (useParallel) {
@@ -2674,6 +2681,10 @@ export async function executeRunCommand(args: string[]): Promise<void> {
         console.log('═══════════════════════════════════════════════════════════════');
         console.log('');
       }
+
+      // Set parallel completion state for final check
+      const pState = parallelExecutor.getState();
+      parallelAllComplete = pState.totalTasksCompleted >= pState.totalTasks || pState.status === 'completed';
     } else if (config.showTui) {
       // Sequential TUI mode (existing path)
       // Pass tasks for initial TUI display in "ready" state
@@ -2704,9 +2715,12 @@ export async function executeRunCommand(args: string[]): Promise<void> {
   }
 
   // Check if all tasks completed successfully
-  const finalState = engine.getState();
-  const allComplete = finalState.tasksCompleted >= finalState.totalTasks ||
-    finalState.status === 'idle';
+  // For parallel mode, parallelAllComplete was set inside the useParallel block
+  // For sequential mode, check engine state
+  const allComplete = parallelAllComplete ?? (() => {
+    const finalState = engine.getState();
+    return finalState.tasksCompleted >= finalState.totalTasks || finalState.status === 'idle';
+  })();
 
   if (allComplete) {
     // Mark as completed and clean up session file

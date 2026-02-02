@@ -465,8 +465,10 @@ export class ParallelExecutor {
               await this.handleMergeFailure(result);
             }
           } else {
-            // Merge failed - don't mark task as complete
+            // Merge failed (non-conflict) - don't mark task as complete
+            // Invoke recovery so task gets requeued/reset in tracker
             groupMergesFailed++;
+            await this.handleMergeFailure(result);
           }
         } else {
           groupTasksFailed++;

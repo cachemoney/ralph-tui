@@ -921,6 +921,24 @@ export function RunApp({
     });
   }, [tasks, remoteTasks, isViewingRemote, showClosedTasks, isParallelMode, parallelWorkers, parallelCompletedLocallyTaskIds, parallelMergedTaskIds]);
 
+  // Derive parallel execution status from worker states.
+  // This allows restart gating to use actual worker completion state rather than stale local status.
+  // Returns 'complete' if all workers finished successfully, 'running' if any are active,
+  // 'idle' if no workers exist, null if not in parallel mode.
+  const parallelDerivedStatus = useMemo((): RalphStatus | null => {
+    if (!isParallelMode) return null;
+    if (!parallelWorkers || parallelWorkers.length === 0) return 'idle';
+
+    const hasRunning = parallelWorkers.some((w) => w.status === 'running' || w.status === 'idle');
+    const allCompleted = parallelWorkers.every((w) => w.status === 'completed');
+    const hasFailed = parallelWorkers.some((w) => w.status === 'failed');
+
+    if (hasRunning) return 'running';
+    if (allCompleted) return 'complete';
+    if (hasFailed) return 'error';
+    return 'idle';
+  }, [isParallelMode, parallelWorkers]);
+
   // Clamp selectedIndex when displayedTasks shrinks (e.g., when hiding closed tasks)
   useEffect(() => {
     if (displayedTasks.length > 0 && selectedIndex >= displayedTasks.length) {
@@ -1618,8 +1636,11 @@ export function RunApp({
             break;
           }
           // Parallel mode: Enter restarts execution when in a terminal state
+          // Use derived status from worker states to avoid stale local status
+          const parallelStatusForRestart = parallelDerivedStatus ?? status;
           if (isParallelMode && onParallelStart &&
-              (status === 'stopped' || status === 'complete' || status === 'idle' || status === 'error')) {
+              (parallelStatusForRestart === 'stopped' || parallelStatusForRestart === 'complete' ||
+               parallelStatusForRestart === 'idle' || parallelStatusForRestart === 'error')) {
             setStatus('running');
             onParallelStart();
             break;
@@ -1650,7 +1671,10 @@ export function RunApp({
             }
           } else if (isParallelMode && onParallelStart) {
             // Parallel mode: restart execution after stop/complete/idle
-            if (status === 'stopped' || status === 'complete' || status === 'idle' || status === 'error') {
+            // Use derived status from worker states to avoid stale local status
+            const parallelStatusForStart = parallelDerivedStatus ?? status;
+            if (parallelStatusForStart === 'stopped' || parallelStatusForStart === 'complete' ||
+                parallelStatusForStart === 'idle' || parallelStatusForStart === 'error') {
               setStatus('running');
               onParallelStart();
             }
@@ -2002,7 +2026,7 @@ export function RunApp({
           break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showKillDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager, isParallelMode, parallelWorkers, parallelConflicts, showConflictPanel, onParallelKill]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showKillDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager, isParallelMode, parallelWorkers, parallelConflicts, showConflictPanel, onParallelKill, onParallelPause, onParallelResume, onParallelStart, parallelDerivedStatus]
   );
 
   useKeyboard(handleKeyboard);

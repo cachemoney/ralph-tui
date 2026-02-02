@@ -85,8 +85,13 @@ export class WorktreeManager {
     // Compute worktree directory as sibling of project (outside project tree)
     // to prevent Claude CLI's project detection from using parent directory
     const defaultWorktreeDir = getWorktreeBaseDir(config.cwd);
+    // Resolve worktreeDir to absolute path - if a relative path is provided,
+    // resolve it relative to cwd for consistency in path handling
+    const resolvedWorktreeDir = config.worktreeDir
+      ? path.resolve(config.cwd, config.worktreeDir)
+      : defaultWorktreeDir;
     this.config = {
-      worktreeDir: config.worktreeDir ?? defaultWorktreeDir,
+      worktreeDir: resolvedWorktreeDir,
       cwd: config.cwd,
       maxWorktrees: config.maxWorktrees ?? 8,
       minFreeDiskSpace: config.minFreeDiskSpace ?? DEFAULT_MIN_FREE_DISK_SPACE,

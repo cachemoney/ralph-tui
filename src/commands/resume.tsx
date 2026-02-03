@@ -47,6 +47,26 @@ import type { TrackerTask } from '../plugins/trackers/types.js';
 import { RunApp } from '../tui/components/RunApp.js';
 
 /**
+ * Check if there's a mismatch between tracker state and session state.
+ *
+ * Returns true if the engine reports 0 tasks but the session has task history,
+ * indicating the tracker cannot find the expected tasks (e.g., wrong epicId,
+ * missing prdPath file, or database state mismatch).
+ *
+ * See: https://github.com/subsy/ralph-tui/issues/247
+ *
+ * @param engineTotalTasks - Number of tasks loaded by the tracker
+ * @param sessionTotalTasks - Number of tasks recorded in the session
+ * @returns true if a warning should be shown about tracker/session mismatch
+ */
+export function shouldWarnAboutTrackerMismatch(
+  engineTotalTasks: number,
+  sessionTotalTasks: number
+): boolean {
+  return engineTotalTasks === 0 && sessionTotalTasks > 0;
+}
+
+/**
  * Parsed resume command arguments
  */
 export interface ResumeArgs {
@@ -645,10 +665,9 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
   }
 
   // Validate tracker state matches session expectations
-  // See: https://github.com/subsy/ralph-tui/issues/247
   const engineState = engine.getState();
   const sessionTotalTasks = resumedState.trackerState.totalTasks;
-  if (engineState.totalTasks === 0 && sessionTotalTasks > 0) {
+  if (shouldWarnAboutTrackerMismatch(engineState.totalTasks, sessionTotalTasks)) {
     console.warn('\nWarning: Session has task history but tracker returned no tasks.');
     console.warn('This may happen if:');
     if (resumedState.trackerState.epicId) {

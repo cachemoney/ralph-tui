@@ -11,29 +11,23 @@ import {
   listSessions,
   cleanupRegistry,
   resolveSession,
+  shouldWarnAboutTrackerMismatch,
   type ResumeArgs,
 } from '../../src/commands/resume.js';
 import type { SessionRegistryEntry } from '../../src/session/registry.js';
 import * as sessionModule from '../../src/session/index.js';
 
 /**
- * Tests for tracker validation logic.
- * Regression tests for https://github.com/subsy/ralph-tui/issues/247
+ * Tests for tracker validation logic (shouldWarnAboutTrackerMismatch).
+ * See: https://github.com/subsy/ralph-tui/issues/247
  *
  * When resuming a session, if the tracker returns no tasks but the session
- * has task history, we should warn the user about the mismatch.
+ * has task history, we warn the user about the mismatch. This indicates
+ * the tracker cannot find the expected tasks (wrong epicId, missing prdPath, etc.).
  */
-describe('tracker validation logic (issue #247)', () => {
-  // Helper that mirrors the validation logic in resume.tsx
-  const shouldWarnAboutTrackerMismatch = (
-    engineTotalTasks: number,
-    sessionTotalTasks: number
-  ): boolean => {
-    return engineTotalTasks === 0 && sessionTotalTasks > 0;
-  };
-
+describe('shouldWarnAboutTrackerMismatch (issue #247)', () => {
   test('returns true when engine has 0 tasks but session has 130', () => {
-    // This was the user's scenario - session showed 108/130 but tracker returned nothing
+    // Scenario: session reports 108/130 complete but tracker finds 0 tasks
     expect(shouldWarnAboutTrackerMismatch(0, 130)).toBe(true);
   });
 
@@ -54,7 +48,7 @@ describe('tracker validation logic (issue #247)', () => {
   });
 
   test('returns false when engine has fewer tasks than session (some completed)', () => {
-    // This is normal - some tasks were completed so fewer remain
+    // Normal scenario: some tasks completed so fewer remain in open/in_progress state
     expect(shouldWarnAboutTrackerMismatch(22, 130)).toBe(false);
   });
 

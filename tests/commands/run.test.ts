@@ -4,7 +4,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
-import { parseRunArgs, printRunHelp } from '../../src/commands/run.jsx';
+import { parseRunArgs, printRunHelp, isSessionComplete } from '../../src/commands/run.jsx';
 
 describe('run command', () => {
   describe('parseRunArgs', () => {
@@ -452,139 +452,81 @@ describe('run command', () => {
   });
 
   /**
-   * Tests for session completion logic.
-   * Regression tests for https://github.com/subsy/ralph-tui/issues/247
+   * Tests for isSessionComplete function.
+   * See: https://github.com/subsy/ralph-tui/issues/247
    *
-   * The bug was: session files were deleted even when tasks were incomplete
-   * because the condition `finalState.status === 'idle'` was always true
-   * after the engine finished (regardless of why it finished).
+   * Session completion is determined solely by task counts, not engine status.
+   * The engine status is always 'idle' after runLoop exits (set in finally block),
+   * so using it for completion detection causes incorrect behavior.
    *
-   * The fix: Only check `tasksCompleted >= totalTasks` for completion.
+   * Correct: tasksCompleted >= totalTasks
+   * Incorrect: tasksCompleted >= totalTasks || status === 'idle'
    */
-  describe('session completion condition (issue #247)', () => {
-    // Helper to simulate engine state for testing completion logic
-    const isAllComplete = (tasksCompleted: number, totalTasks: number): boolean => {
-      // This mirrors the fixed logic in run.tsx:1978
-      return tasksCompleted >= totalTasks;
-    };
-
-    test('returns false when 0 tasks completed out of 5', () => {
-      expect(isAllComplete(0, 5)).toBe(false);
-    });
-
-    test('returns false when 3 tasks completed out of 5', () => {
-      expect(isAllComplete(3, 5)).toBe(false);
-    });
-
-    test('returns false when 108 tasks completed out of 130 (reporter scenario)', () => {
-      // This was the user's exact scenario from issue #247
-      expect(isAllComplete(108, 130)).toBe(false);
-    });
-
-    test('returns true when 5 tasks completed out of 5', () => {
-      expect(isAllComplete(5, 5)).toBe(true);
-    });
-
-    test('returns true when more tasks completed than total (edge case)', () => {
-      // This shouldn't happen normally, but if it does, treat as complete
-      expect(isAllComplete(6, 5)).toBe(true);
-    });
-
-    test('returns true when 0 tasks out of 0 (empty project)', () => {
-      // Edge case: no tasks is considered complete
-      expect(isAllComplete(0, 0)).toBe(true);
-    });
-
-    test('completion does NOT depend on engine status', () => {
-      // The key fix: we don't check engine status anymore
-      // Previously, status === 'idle' was always true after engine finished
-      // This test documents that completion is purely based on task counts
-      const engineStatus = 'idle'; // This would always be true
-      const tasksCompleted = 3;
-      const totalTasks = 5;
-
-      // Old buggy logic would have been:
-      // const allComplete = tasksCompleted >= totalTasks || engineStatus === 'idle';
-      // This would incorrectly return true!
-
-      // Fixed logic:
-      const allComplete = isAllComplete(tasksCompleted, totalTasks);
-      expect(allComplete).toBe(false);
-
-      // Verify the old logic would have been wrong
-      const oldBuggyLogic = tasksCompleted >= totalTasks || engineStatus === 'idle';
-      expect(oldBuggyLogic).toBe(true); // This was the bug!
-    });
-  });
-
-  /**
-   * Tests for parallel mode completion logic.
-   * The parallel mode uses a separate completion flag (parallelAllComplete)
-   * which takes precedence over sequential mode's engine state check.
-   *
-   * This ensures that parallel mode completion works correctly and
-   * that the fix for issue #247 is applied to the fallback sequential path.
-   */
-  describe('parallel mode completion condition', () => {
-    // Helper that mirrors the completion logic in run.tsx
-    // Uses parallelAllComplete if set, otherwise falls back to sequential check
-    const computeAllComplete = (
-      parallelAllComplete: boolean | null,
-      tasksCompleted: number,
-      totalTasks: number
-    ): boolean => {
-      // This mirrors the fixed logic in run.tsx:2862-2865
-      return parallelAllComplete ?? (tasksCompleted >= totalTasks);
-    };
-
-    describe('when parallelAllComplete is set (parallel mode)', () => {
-      test('uses parallelAllComplete=true even when sequential logic says false', () => {
-        // Parallel mode says complete, but sequential would say incomplete
-        expect(computeAllComplete(true, 0, 10)).toBe(true);
+  describe('isSessionComplete (issue #247)', () => {
+    describe('sequential mode (parallelAllComplete is null)', () => {
+      test('returns false when 0 tasks completed out of 5', () => {
+        expect(isSessionComplete(null, 0, 5)).toBe(false);
       });
 
-      test('uses parallelAllComplete=false even when sequential logic says true', () => {
-        // Parallel mode says incomplete, but sequential would say complete
-        expect(computeAllComplete(false, 10, 10)).toBe(false);
+      test('returns false when 3 tasks completed out of 5', () => {
+        expect(isSessionComplete(null, 3, 5)).toBe(false);
+      });
+
+      test('returns false when 108 tasks completed out of 130', () => {
+        // Scenario from issue #247: session shows 108/130 but should not be "complete"
+        expect(isSessionComplete(null, 108, 130)).toBe(false);
+      });
+
+      test('returns true when 5 tasks completed out of 5', () => {
+        expect(isSessionComplete(null, 5, 5)).toBe(true);
+      });
+
+      test('returns true when more tasks completed than total (edge case)', () => {
+        // Edge case: if somehow tasksCompleted exceeds totalTasks, treat as complete
+        expect(isSessionComplete(null, 6, 5)).toBe(true);
+      });
+
+      test('returns true when 0 tasks out of 0 (empty project)', () => {
+        // Edge case: no tasks means nothing to do, so complete
+        expect(isSessionComplete(null, 0, 0)).toBe(true);
+      });
+
+      test('completion is based on task counts, not engine status', () => {
+        // Key invariant: engine status is irrelevant to completion detection.
+        // The engine status is always 'idle' after runLoop exits (finally block),
+        // regardless of why execution stopped (user quit, max iterations, completion).
+        const tasksCompleted = 3;
+        const totalTasks = 5;
+
+        // Correct behavior: incomplete tasks means session is not complete
+        expect(isSessionComplete(null, tasksCompleted, totalTasks)).toBe(false);
+
+        // Demonstrate why checking engine status causes incorrect behavior:
+        // status === 'idle' is always true after engine stops, so this logic
+        // incorrectly marks sessions as complete even with incomplete tasks
+        const engineStatus = 'idle';
+        const incorrectLogic = tasksCompleted >= totalTasks || engineStatus === 'idle';
+        expect(incorrectLogic).toBe(true); // Incorrectly returns true!
+      });
+    });
+
+    describe('parallel mode (parallelAllComplete is set)', () => {
+      test('uses parallelAllComplete=true even when task counts suggest incomplete', () => {
+        // Parallel executor says complete, even though counts show 0/10
+        expect(isSessionComplete(true, 0, 10)).toBe(true);
+      });
+
+      test('uses parallelAllComplete=false even when task counts suggest complete', () => {
+        // Parallel executor says incomplete, even though counts show 10/10
+        expect(isSessionComplete(false, 10, 10)).toBe(false);
       });
 
       test('parallelAllComplete=true with matching counts', () => {
-        expect(computeAllComplete(true, 5, 5)).toBe(true);
+        expect(isSessionComplete(true, 5, 5)).toBe(true);
       });
 
       test('parallelAllComplete=false with incomplete counts', () => {
-        expect(computeAllComplete(false, 3, 5)).toBe(false);
-      });
-    });
-
-    describe('when parallelAllComplete is null (sequential mode)', () => {
-      test('falls back to sequential logic - incomplete', () => {
-        expect(computeAllComplete(null, 3, 5)).toBe(false);
-      });
-
-      test('falls back to sequential logic - complete', () => {
-        expect(computeAllComplete(null, 5, 5)).toBe(true);
-      });
-
-      test('falls back to sequential logic - empty project', () => {
-        expect(computeAllComplete(null, 0, 0)).toBe(true);
-      });
-
-      test('sequential fallback does NOT use engine status (fix for #247)', () => {
-        // The key assertion: even with null parallelAllComplete,
-        // we only check task counts, not engine status
-        const parallelAllComplete = null;
-        const tasksCompleted = 3;
-        const totalTasks = 5;
-        const engineStatus = 'idle'; // Would always be true after engine stops
-
-        const allComplete = computeAllComplete(parallelAllComplete, tasksCompleted, totalTasks);
-        expect(allComplete).toBe(false);
-
-        // Old buggy fallback would have been:
-        // const allComplete = parallelAllComplete ?? (tasksCompleted >= totalTasks || engineStatus === 'idle');
-        const oldBuggyLogic = parallelAllComplete ?? (tasksCompleted >= totalTasks || engineStatus === 'idle');
-        expect(oldBuggyLogic).toBe(true); // This was the bug!
+        expect(isSessionComplete(false, 3, 5)).toBe(false);
       });
     });
   });

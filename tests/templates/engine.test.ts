@@ -712,12 +712,16 @@ describe('Template Engine - Installation', () => {
     });
 
     afterEach(async () => {
-      process.env.HOME = originalHome;
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
       await cleanupTestDir(testDir);
     });
 
     beforeAll(async () => {
-      // CRITICAL: Get the REAL template engine module first, bypassing any cached mock
+      // CRITICAL: Load the real template engine module, bypassing any cached mock
       // migration-install.test.ts mocks this module at module level with empty functions
       // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
       const realTemplateEngine = await import('../../src/templates/engine.js?test-reload-install') as typeof import('../../src/templates/engine.js');

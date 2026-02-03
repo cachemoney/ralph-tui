@@ -7,20 +7,17 @@
  * which causes the collectSystemInfo function to fail because it depends on
  * getDefaultAgentConfig which uses registry.hasPlugin().
  *
- * By placing these tests in a separate file and importing the modules fresh
- * with unique query strings, we bypass the polluted module cache.
+ * By placing these tests in a separate file and resetting the registry singleton
+ * before registering builtins, we ensure a clean state.
  */
 
-import { describe, expect, test, beforeEach, afterEach, beforeAll } from 'bun:test'
+import { describe, expect, test, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test'
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-
-// Import types from the original module (types are safe, no runtime dependencies)
-import type { SystemInfo } from '../../src/commands/info.js'
-
-// These will be populated in beforeAll with fresh imports
-let collectSystemInfo: (cwd?: string) => Promise<SystemInfo>
+import { AgentRegistry } from '../../src/plugins/agents/registry.js'
+import { registerBuiltinAgents } from '../../src/plugins/agents/builtin/index.js'
+import { collectSystemInfo } from '../../src/commands/info.js'
 
 // Helper to create a temp directory for each test
 async function createTempDir(): Promise<string> {
@@ -47,21 +44,17 @@ async function writeConfig(dir: string, config: Record<string, unknown>): Promis
 describe('collectSystemInfo', () => {
   let tempDir: string
 
-  beforeAll(async () => {
-    // Reset the registry singleton to clear any pollution
-    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
-    const { AgentRegistry } = await import('../../src/plugins/agents/registry.js?test-reload')
+  beforeAll(() => {
+    // Reset the registry singleton to clear any pollution from other tests,
+    // then register builtin agents fresh. Using direct imports ensures all
+    // modules share the same singleton instance.
     AgentRegistry.resetInstance()
-
-    // Register builtin agents fresh
-    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
-    const { registerBuiltinAgents } = await import('../../src/plugins/agents/builtin/index.js?test-reload')
     registerBuiltinAgents()
+  })
 
-    // Import collectSystemInfo so it uses the fresh registry
-    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
-    const infoModule = await import('../../src/commands/info.js?test-reload')
-    collectSystemInfo = infoModule.collectSystemInfo
+  afterAll(() => {
+    // Clean up after tests
+    AgentRegistry.resetInstance()
   })
 
   beforeEach(async () => {

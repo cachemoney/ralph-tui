@@ -1,7 +1,7 @@
 /**
- * ABOUTME: Codex CLI agent plugin for OpenAI's codex command.
- * Integrates with Codex CLI for AI-assisted coding.
- * Supports: non-interactive exec mode, JSONL streaming, full-auto mode, sandbox modes.
+ * ABOUTME: Cursor Agent CLI plugin for the `cursor` command.
+ * Integrates with Cursor Agent CLI for AI-assisted coding.
+ * Supports: print mode execution, JSONL streaming, auto-approve, model selection.
  */
 
 import { spawn } from 'node:child_process';
@@ -22,62 +22,69 @@ import type {
 export { extractErrorMessage } from '../utils.js';
 
 /**
- * Parse Codex JSON line into standardized display events.
+ * Parse Cursor Agent JSON line into standardized display events.
  * Returns AgentDisplayEvent[] - the shared processAgentEvents decides what to show.
  *
- * Codex CLI event types (when using --json flag):
- * - "thread.started": Session started (skip)
- * - "turn.started": Turn started (skip)
- * - "item.started": Item starting - can be todo_list, command_execution, agent_message
- * - "item.completed": Item finished - extract text from agent_message
- * - "turn.completed": Turn finished with usage stats (skip)
- * - "error": Error from Codex
+ * Cursor Agent CLI event types (when using --output-format stream-json):
+ * - "system" with subtype "init": Session initialization
+ * - "assistant" with message.content[]: AI response text and tool_use blocks
+ * - "tool_call" with subtype "started/completed": Tool invocations
+ * - "result": Final result with duration
+ * - "error": Error from Cursor
  * @internal Exported for testing only.
  */
-export function parseCodexJsonLine(jsonLine: string): AgentDisplayEvent[] {
+export function parseCursorJsonLine(jsonLine: string): AgentDisplayEvent[] {
   if (!jsonLine || jsonLine.length === 0) return [];
 
   try {
     const event = JSON.parse(jsonLine);
     const events: AgentDisplayEvent[] = [];
 
-    // Handle Codex CLI's actual event types
-    if (event.type === 'item.completed' || event.type === 'item.started') {
-      const item = event.item;
-      if (!item) return [];
-
-      // Agent message - extract text
-      if (item.type === 'agent_message' && item.text) {
-        events.push({ type: 'text', content: item.text });
-      }
-      // Command execution - show as tool use
-      else if (item.type === 'command_execution') {
-        if (event.type === 'item.started' && item.command) {
-          events.push({ type: 'tool_use', name: 'shell', input: { command: item.command } });
-        } else if (event.type === 'item.completed') {
-          const isError = item.exit_code !== 0 && item.exit_code !== null;
-          if (isError && item.aggregated_output) {
-            events.push({ type: 'error', message: item.aggregated_output.slice(0, 500) });
+    // Handle system events (e.g., init)
+    if (event.type === 'system') {
+      events.push({ type: 'system', subtype: event.subtype as string });
+    }
+    // Handle assistant messages (text and tool use)
+    else if (event.type === 'assistant' && event.message) {
+      const message = event.message as { content?: Array<Record<string, unknown>> };
+      if (message.content && Array.isArray(message.content)) {
+        for (const block of message.content) {
+          if (block.type === 'text' && typeof block.text === 'string') {
+            events.push({ type: 'text', content: block.text });
+          } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+            events.push({
+              type: 'tool_use',
+              name: block.name,
+              input: block.input as Record<string, unknown>,
+            });
           }
-          events.push({ type: 'tool_result' });
-        }
-      }
-      // File operations
-      else if (item.type === 'file_edit' || item.type === 'file_write' || item.type === 'file_read') {
-        if (event.type === 'item.started') {
-          const filePath = item.file_path || item.path || 'unknown';
-          events.push({ type: 'tool_use', name: item.type, input: { path: filePath } });
-        } else {
-          events.push({ type: 'tool_result' });
         }
       }
     }
-    // Error events
+    // Handle tool_call events with started/completed subtypes
+    else if (event.type === 'tool_call') {
+      if (event.subtype === 'started') {
+        const toolName = event.name || event.tool || 'unknown';
+        events.push({ type: 'tool_use', name: toolName, input: event.input });
+      } else if (event.subtype === 'completed') {
+        const isError = event.is_error === true || event.error !== undefined;
+        if (isError) {
+          const errMsg = extractErrorMessage(event.error);
+          events.push({ type: 'error', message: errMsg });
+        }
+        events.push({ type: 'tool_result' });
+      }
+    }
+    // Handle result events (session completion)
+    else if (event.type === 'result') {
+      // Result events typically contain duration/stats, which we skip for display
+      // but can be used for logging
+    }
+    // Handle error events
     else if (event.type === 'error' || event.error) {
       const errorMsg = extractErrorMessage(event.error) || extractErrorMessage(event.message) || 'Unknown error';
       events.push({ type: 'error', message: errorMsg });
     }
-    // Skip: thread.started, turn.started, turn.completed (no displayable content)
 
     return events;
   } catch {
@@ -87,44 +94,44 @@ export function parseCodexJsonLine(jsonLine: string): AgentDisplayEvent[] {
 }
 
 /**
- * Parse Codex JSON stream output into display events.
+ * Parse Cursor Agent stream output into display events.
  * @internal Exported for testing only.
  */
-export function parseCodexOutputToEvents(data: string): AgentDisplayEvent[] {
+export function parseCursorOutputToEvents(data: string): AgentDisplayEvent[] {
   const allEvents: AgentDisplayEvent[] = [];
   for (const line of data.split('\n')) {
-    const events = parseCodexJsonLine(line.trim());
+    const events = parseCursorJsonLine(line.trim());
     allEvents.push(...events);
   }
   return allEvents;
 }
 
 /**
- * Codex CLI agent plugin implementation.
- * Uses the `codex exec` command for non-interactive AI coding tasks.
+ * Cursor CLI agent plugin implementation.
+ * Uses the `cursor` CLI to execute AI coding tasks.
  */
-export class CodexAgentPlugin extends BaseAgentPlugin {
+export class CursorAgentPlugin extends BaseAgentPlugin {
   readonly meta: AgentPluginMeta = {
-    id: 'codex',
-    name: 'Codex CLI',
-    description: 'OpenAI Codex CLI for AI-assisted coding',
+    id: 'cursor',
+    name: 'Cursor Agent',
+    description: 'Cursor Agent CLI for AI-assisted coding',
     version: '1.0.0',
-    author: 'OpenAI',
-    defaultCommand: 'codex',
+    author: 'Cursor',
+    defaultCommand: 'cursor',
     supportsStreaming: true,
     supportsInterrupt: true,
     supportsFileContext: false,
     supportsSubagentTracing: true,
     structuredOutputFormat: 'jsonl',
     skillsPaths: {
-      personal: '~/.codex/skills',
-      repo: '.codex/skills',
+      personal: '~/.cursor/skills',
+      repo: '.cursor/skills',
     },
   };
 
   private model?: string;
-  private fullAuto = true;
-  private sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' = 'workspace-write';
+  private force = true;
+  private mode: 'agent' | 'plan' | 'ask' = 'agent';
   protected override defaultTimeout = 0;
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
@@ -134,13 +141,13 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
       this.model = config.model;
     }
 
-    if (typeof config.fullAuto === 'boolean') {
-      this.fullAuto = config.fullAuto;
+    if (typeof config.force === 'boolean') {
+      this.force = config.force;
     }
 
-    if (typeof config.sandbox === 'string' &&
-        ['read-only', 'workspace-write', 'danger-full-access'].includes(config.sandbox)) {
-      this.sandbox = config.sandbox as typeof this.sandbox;
+    if (typeof config.mode === 'string' &&
+        ['agent', 'plan', 'ask'].includes(config.mode)) {
+      this.mode = config.mode as typeof this.mode;
     }
 
     if (typeof config.timeout === 'number' && config.timeout > 0) {
@@ -150,11 +157,11 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
 
   override getSandboxRequirements() {
     return {
-      authPaths: ['~/.codex', '~/.config/codex', '~/.local/share/codex'],
+      authPaths: ['~/.cursor', '~/.config/cursor'],
       binaryPaths: [
         '/usr/local/bin',
         '~/.local/bin',
-        '~/.local/share/mise/installs',
+        '~/.cursor/bin',
       ],
       runtimePaths: [],
       requiresNetwork: true,
@@ -168,7 +175,7 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
     if (!findResult.found) {
       return {
         available: false,
-        error: `Codex CLI not found in PATH. Install from: https://github.com/openai/codex`,
+        error: `Cursor CLI not found in PATH. Install from: https://docs.cursor.com/cli`,
       };
     }
 
@@ -232,7 +239,7 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
           if (!versionMatch?.[1]) {
             safeResolve({
               success: false,
-              error: `Unable to parse codex version output: ${stdout}`,
+              error: `Unable to parse agent version output: ${stdout}`,
             });
             return;
           }
@@ -245,7 +252,7 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
       const timer = setTimeout(() => {
         proc.kill();
         safeResolve({ success: false, error: 'Timeout waiting for --version' });
-      }, 15000);
+      }, 5000);
     });
   }
 
@@ -258,28 +265,28 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
         type: 'text',
         default: '',
         required: false,
-        help: 'OpenAI model to use (leave empty for default)',
+        help: 'Model name (e.g., claude-4.5-sonnet, gpt-5.2). Leave empty for default.',
       },
       {
-        id: 'fullAuto',
-        prompt: 'Enable full-auto mode?',
+        id: 'force',
+        prompt: 'Auto-approve file modifications?',
         type: 'boolean',
         default: true,
         required: false,
-        help: 'Auto-approve all actions for autonomous operation',
+        help: 'Enable --force flag for autonomous operation',
       },
       {
-        id: 'sandbox',
-        prompt: 'Sandbox mode:',
+        id: 'mode',
+        prompt: 'Execution mode:',
         type: 'select',
         choices: [
-          { value: 'read-only', label: 'Read Only', description: 'No file modifications' },
-          { value: 'workspace-write', label: 'Workspace Write', description: 'Can modify workspace files' },
-          { value: 'danger-full-access', label: 'Full Access', description: 'Full system access (dangerous)' },
+          { value: 'agent', label: 'Agent', description: 'Full agent mode (default)' },
+          { value: 'plan', label: 'Plan', description: 'Planning only, no execution' },
+          { value: 'ask', label: 'Ask', description: 'Question answering mode' },
         ],
-        default: 'workspace-write',
+        default: 'agent',
         required: false,
-        help: 'Sandbox restrictions for file access',
+        help: 'Cursor Agent execution mode',
       },
     ];
   }
@@ -289,39 +296,32 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
     _files?: AgentFileContext[],
     _options?: AgentExecuteOptions
   ): string[] {
-    const preArgs: string[] = [];
     const args: string[] = [];
 
-    // --full-auto forces workspace-write; use approval flag when sandbox is customized.
-    // -a is a global flag (must come before exec), --full-auto is a subcommand flag (after exec).
-    if (this.fullAuto && this.sandbox !== 'workspace-write') {
-      preArgs.push('-a', 'on-request');
+    // Print mode for non-interactive output
+    args.push('--print');
+
+    // Auto-approve file modifications
+    if (this.force) {
+      args.push('--force');
     }
 
-    // Use exec subcommand for non-interactive mode
-    args.push('exec');
-
-    // --full-auto is a subcommand flag, must come after exec
-    if (this.fullAuto && this.sandbox === 'workspace-write') {
-      args.push('--full-auto');
-    }
-
-    // Always use JSON format for output parsing
-    // This gives us structured events (text, tool_use, etc.) that we can format nicely
-    args.push('--json');
+    // Always use stream-json format for output parsing
+    args.push('--output-format', 'stream-json');
 
     // Model selection
     if (this.model) {
       args.push('--model', this.model);
     }
 
-    // Sandbox mode
-    args.push('--sandbox', this.sandbox);
+    // Execution mode (if not the default 'agent')
+    if (this.mode !== 'agent') {
+      args.push('--mode', this.mode);
+    }
 
-    // Use '-' to tell Codex to read prompt from stdin (per CLI reference docs)
-    args.push('-');
+    // Note: Prompt is passed via stdin (see getStdinInput)
 
-    return [...preArgs, ...args];
+    return args;
   }
 
   /**
@@ -338,7 +338,7 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
   }
 
   /**
-   * Override execute to parse Codex JSON output.
+   * Override execute to parse Cursor Agent JSON output.
    * Wraps the onStdout/onStdoutSegments callbacks to parse JSONL events and extract displayable content.
    * Also forwards raw JSONL messages to onJsonlMessage for subagent tracing.
    *
@@ -369,7 +369,7 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
       }
 
       // Process for display events
-      const events = parseCodexOutputToEvents(trimmed);
+      const events = parseCursorOutputToEvents(trimmed);
       if (events.length > 0) {
         if (options?.onStdoutSegments) {
           const segments = processAgentEventsToSegments(events);
@@ -425,7 +425,7 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
             }
 
             // Process for display events
-            const events = parseCodexOutputToEvents(completeData);
+            const events = parseCursorOutputToEvents(completeData);
             if (events.length > 0) {
               // Call TUI-native segments callback if provided
               if (options?.onStdoutSegments) {
@@ -454,16 +454,36 @@ export class CodexAgentPlugin extends BaseAgentPlugin {
     return super.execute(prompt, files, parsedOptions);
   }
 
-  override async validateSetup(_answers: Record<string, unknown>): Promise<string | null> {
+  override async validateSetup(answers: Record<string, unknown>): Promise<string | null> {
+    const mode = answers.mode;
+    if (mode !== undefined && mode !== '' && typeof mode === 'string') {
+      if (!['agent', 'plan', 'ask'].includes(mode)) {
+        return 'Invalid mode. Must be one of: agent, plan, ask';
+      }
+    }
     return null;
   }
 
   override validateModel(_model: string): string | null {
-    // Codex accepts various OpenAI models, no strict validation
+    // Cursor Agent accepts various models, no strict validation
     return null;
+  }
+
+  /**
+   * Get Cursor-specific suggestions for preflight failures.
+   * Provides actionable guidance for common configuration issues.
+   */
+  protected override getPreflightSuggestion(): string {
+    return (
+      'Common fixes for Cursor Agent:\n' +
+      '  1. Test Cursor directly: cursor --print "hello"\n' +
+      '  2. Check Cursor is installed: cursor --version\n' +
+      '  3. Install from: https://docs.cursor.com/cli\n' +
+      '  4. Verify your model configuration if using a specific model'
+    );
   }
 }
 
-const createCodexAgent: AgentPluginFactory = () => new CodexAgentPlugin();
+const createCursorAgent: AgentPluginFactory = () => new CursorAgentPlugin();
 
-export default createCodexAgent;
+export default createCursorAgent;

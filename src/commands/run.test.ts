@@ -1,11 +1,21 @@
 /**
  * ABOUTME: Tests for the run command utilities.
- * Covers task range filtering and related utilities.
+ * Covers task range filtering, conflict resolution helpers, and related utilities.
  */
 
 import { describe, test, expect } from 'bun:test';
-import { filterTasksByRange, parseRunArgs, printRunHelp, type TaskRangeFilter } from './run.js';
+import {
+  filterTasksByRange,
+  parseRunArgs,
+  printRunHelp,
+  clearConflictState,
+  findResolutionByPath,
+  areAllConflictsResolved,
+  type TaskRangeFilter,
+  type ParallelConflictState,
+} from './run.js';
 import type { TrackerTask } from '../plugins/trackers/types.js';
+import type { FileConflict, ConflictResolutionResult } from '../parallel/types.js';
 
 /**
  * Helper to create mock tasks for testing.
@@ -346,130 +356,166 @@ describe('printRunHelp', () => {
   });
 });
 
-describe('conflict resolution callbacks', () => {
+describe('conflict resolution helpers', () => {
   /**
-   * These tests verify the conflict resolution callback type signatures
-   * and expected behavior. The actual keyboard handling is in RunApp.tsx
-   * and requires integration testing with the TUI framework.
+   * Tests for the exported conflict resolution helper functions.
+   * These functions are used by the parallel execution callbacks.
    */
 
-  describe('callback type signatures', () => {
-    test('onConflictAbort returns a Promise', async () => {
-      // Simulate the callback implementation from run.tsx
-      let stopped = false;
-      let conflictsCleared = false;
+  /** Helper to create a mock FileConflict */
+  function mockConflict(filePath: string): FileConflict {
+    return {
+      filePath,
+      oursContent: 'ours',
+      theirsContent: 'theirs',
+      baseContent: 'base',
+      conflictMarkers: '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch',
+    };
+  }
 
-      const onConflictAbort = async () => {
-        // Simulates: await parallelExecutor.stop()
-        stopped = true;
-        // Simulates clearing conflict state
-        conflictsCleared = true;
-      };
+  /** Helper to create a mock ConflictResolutionResult */
+  function mockResolution(filePath: string, success: boolean): ConflictResolutionResult {
+    return {
+      filePath,
+      success,
+      method: 'ai',
+      resolvedContent: success ? 'resolved' : undefined,
+      error: success ? undefined : 'Resolution failed',
+    };
+  }
 
-      await onConflictAbort();
-
-      expect(stopped).toBe(true);
-      expect(conflictsCleared).toBe(true);
-    });
-
-    test('onConflictAccept receives filePath parameter', () => {
-      let receivedFilePath: string | undefined;
-
-      const onConflictAccept = (filePath: string) => {
-        receivedFilePath = filePath;
-      };
-
-      onConflictAccept('src/example.ts');
-
-      expect(receivedFilePath).toBe('src/example.ts');
-    });
-
-    test('onConflictAcceptAll requires no parameters', () => {
-      let called = false;
-
-      const onConflictAcceptAll = () => {
-        called = true;
-      };
-
-      onConflictAcceptAll();
-
-      expect(called).toBe(true);
-    });
-  });
-
-  describe('parallel state conflict management', () => {
-    test('conflict state structure is correct', () => {
-      // Mirrors the parallelState structure in run.tsx
-      const parallelState = {
-        conflicts: [] as Array<{ filePath: string }>,
-        conflictResolutions: [] as Array<{ filePath: string; success: boolean }>,
-        conflictTaskId: '',
-        conflictTaskTitle: '',
-        aiResolving: false,
-      };
-
-      // Simulate conflict:detected event
-      parallelState.conflicts = [
-        { filePath: 'src/file1.ts' },
-        { filePath: 'src/file2.ts' },
-      ];
-      parallelState.conflictTaskId = 'TASK-001';
-      parallelState.conflictTaskTitle = 'Test task';
-
-      expect(parallelState.conflicts).toHaveLength(2);
-      expect(parallelState.conflictTaskId).toBe('TASK-001');
-    });
-
-    test('onConflictAbort clears conflict state', () => {
-      const parallelState = {
-        conflicts: [{ filePath: 'src/file1.ts' }],
-        conflictResolutions: [{ filePath: 'src/file1.ts', success: true }],
+  describe('clearConflictState', () => {
+    test('clears all conflict-related fields', () => {
+      const state: ParallelConflictState = {
+        conflicts: [mockConflict('src/file1.ts'), mockConflict('src/file2.ts')],
+        conflictResolutions: [mockResolution('src/file1.ts', true)],
         conflictTaskId: 'TASK-001',
         conflictTaskTitle: 'Test task',
         aiResolving: true,
       };
 
-      // Simulate onConflictAbort implementation
-      const onConflictAbort = async () => {
-        parallelState.conflicts = [];
-        parallelState.conflictResolutions = [];
-        parallelState.conflictTaskId = '';
-        parallelState.conflictTaskTitle = '';
-        parallelState.aiResolving = false;
-      };
+      clearConflictState(state);
 
-      onConflictAbort();
-
-      expect(parallelState.conflicts).toHaveLength(0);
-      expect(parallelState.conflictResolutions).toHaveLength(0);
-      expect(parallelState.conflictTaskId).toBe('');
-      expect(parallelState.conflictTaskTitle).toBe('');
-      expect(parallelState.aiResolving).toBe(false);
+      expect(state.conflicts).toHaveLength(0);
+      expect(state.conflictResolutions).toHaveLength(0);
+      expect(state.conflictTaskId).toBe('');
+      expect(state.conflictTaskTitle).toBe('');
+      expect(state.aiResolving).toBe(false);
     });
 
-    test('onConflictAccept finds resolution by filePath', () => {
-      const parallelState = {
-        conflictResolutions: [
-          { filePath: 'src/file1.ts', success: true },
-          { filePath: 'src/file2.ts', success: false },
-        ],
+    test('works on already empty state', () => {
+      const state: ParallelConflictState = {
+        conflicts: [],
+        conflictResolutions: [],
+        conflictTaskId: '',
+        conflictTaskTitle: '',
+        aiResolving: false,
       };
 
-      // Simulate onConflictAccept implementation
-      const onConflictAccept = (filePath: string) => {
-        const resolution = parallelState.conflictResolutions.find(
-          (r) => r.filePath === filePath
-        );
-        return resolution;
-      };
+      // Should not throw
+      clearConflictState(state);
 
-      const result1 = onConflictAccept('src/file1.ts');
-      const result2 = onConflictAccept('src/file2.ts');
-      const result3 = onConflictAccept('nonexistent.ts');
+      expect(state.conflicts).toHaveLength(0);
+      expect(state.conflictTaskId).toBe('');
+    });
+  });
 
-      expect(result1?.success).toBe(true);
-      expect(result2?.success).toBe(false);
-      expect(result3).toBeUndefined();
+  describe('findResolutionByPath', () => {
+    test('finds resolution when it exists', () => {
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/file1.ts', true),
+        mockResolution('src/file2.ts', false),
+        mockResolution('src/file3.ts', true),
+      ];
+
+      const result = findResolutionByPath(resolutions, 'src/file2.ts');
+
+      expect(result).toBeDefined();
+      expect(result?.filePath).toBe('src/file2.ts');
+      expect(result?.success).toBe(false);
+    });
+
+    test('returns undefined when resolution does not exist', () => {
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/file1.ts', true),
+      ];
+
+      const result = findResolutionByPath(resolutions, 'nonexistent.ts');
+
+      expect(result).toBeUndefined();
+    });
+
+    test('returns undefined for empty resolutions array', () => {
+      const result = findResolutionByPath([], 'src/file1.ts');
+
+      expect(result).toBeUndefined();
+    });
+
+    test('finds first match when duplicates exist', () => {
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/file1.ts', true),
+        mockResolution('src/file1.ts', false), // duplicate with different success
+      ];
+
+      const result = findResolutionByPath(resolutions, 'src/file1.ts');
+
+      expect(result?.success).toBe(true); // First match
+    });
+  });
+
+  describe('areAllConflictsResolved', () => {
+    test('returns true when all conflicts have successful resolutions', () => {
+      const conflicts: FileConflict[] = [
+        mockConflict('src/file1.ts'),
+        mockConflict('src/file2.ts'),
+      ];
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/file1.ts', true),
+        mockResolution('src/file2.ts', true),
+      ];
+
+      expect(areAllConflictsResolved(conflicts, resolutions)).toBe(true);
+    });
+
+    test('returns false when some resolutions failed', () => {
+      const conflicts: FileConflict[] = [
+        mockConflict('src/file1.ts'),
+        mockConflict('src/file2.ts'),
+      ];
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/file1.ts', true),
+        mockResolution('src/file2.ts', false), // failed
+      ];
+
+      expect(areAllConflictsResolved(conflicts, resolutions)).toBe(false);
+    });
+
+    test('returns false when resolutions are missing', () => {
+      const conflicts: FileConflict[] = [
+        mockConflict('src/file1.ts'),
+        mockConflict('src/file2.ts'),
+      ];
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/file1.ts', true),
+        // file2.ts resolution missing
+      ];
+
+      expect(areAllConflictsResolved(conflicts, resolutions)).toBe(false);
+    });
+
+    test('returns true when no conflicts exist', () => {
+      expect(areAllConflictsResolved([], [])).toBe(true);
+    });
+
+    test('returns false when resolutions exist but for wrong files', () => {
+      const conflicts: FileConflict[] = [
+        mockConflict('src/file1.ts'),
+      ];
+      const resolutions: ConflictResolutionResult[] = [
+        mockResolution('src/other.ts', true), // wrong file
+      ];
+
+      expect(areAllConflictsResolved(conflicts, resolutions)).toBe(false);
     });
   });
 

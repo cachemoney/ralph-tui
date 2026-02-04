@@ -1882,10 +1882,13 @@ async function runParallelWithTui(
         onConflictAbort={async () => {
           // Stop the executor gracefully. Full cleanup (worktrees, git state) is
           // guaranteed by execute()'s finally block which calls this.cleanup().
-          // We clear UI conflict state synchronously here for immediate feedback.
-          await parallelExecutor.stop();
-          clearConflictState(parallelState);
-          triggerRerender?.();
+          // We clear UI conflict state in finally to ensure it runs even if stop() rejects.
+          try {
+            await parallelExecutor.stop();
+          } finally {
+            clearConflictState(parallelState);
+            triggerRerender?.();
+          }
         }}
         onConflictAccept={(filePath: string) => {
           // Mark file as accepted - the AI resolution continues automatically

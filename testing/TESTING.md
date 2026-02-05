@@ -235,6 +235,100 @@ jq '.userStories | all(.passes)' ~/.cache/ralph-tui/test-workspace/test-prd.json
 test -f ~/.cache/ralph-tui/test-workspace/summary.txt && echo "PASS" || echo "FAIL"
 ```
 
+## Testing AI Conflict Resolution
+
+The `test-conflict-prd.json` is specifically designed to trigger merge conflicts during parallel execution, allowing you to test the AI conflict resolution feature.
+
+### How It Works
+
+The conflict PRD has three parallel tasks (CONFLICT-001, 002, 003) that all modify the **same file** (`FEATURES.md`). When running in parallel:
+
+1. Each worktree starts from the same base (no `FEATURES.md`)
+2. Each agent creates `FEATURES.md` with different content
+3. When merging back, Git detects conflicting changes
+4. The AI resolver is invoked to intelligently merge the content
+
+### Running the Conflict Test
+
+```bash
+# Setup (if not already done)
+./testing/setup-test-workspace.sh
+
+# Copy the conflict PRD to workspace
+cp testing/test-conflict-prd.json ~/.cache/ralph-tui/test-workspace/test-conflict-prd.json
+
+# Run with parallel execution (use --parallel to force parallel mode)
+bun run dev -- run --prd ~/.cache/ralph-tui/test-workspace/test-conflict-prd.json \
+  --cwd ~/.cache/ralph-tui/test-workspace \
+  --parallel 3
+
+# Reset and try again
+./testing/reset-test.sh
+cp testing/test-conflict-prd.json ~/.cache/ralph-tui/test-workspace/test-conflict-prd.json
+```
+
+### Expected Behavior
+
+```
+CONFLICT-001 ─────┐
+                  │
+CONFLICT-002 ─────┼──▶ [MERGE CONFLICTS] ──▶ AI Resolution ──▶ CONFLICT-004
+                  │
+CONFLICT-003 ─────┘
+```
+
+1. **Parallel Execution**: All three CONFLICT-00x tasks run simultaneously
+2. **Conflict Detection**: When merging worktrees, Git reports conflicts in `FEATURES.md`
+3. **AI Resolution**: The conflict resolver spawns the session agent to intelligently merge
+4. **Final Task**: CONFLICT-004 reads the merged `FEATURES.md` and creates a summary
+
+### Verifying AI Resolution
+
+After a successful run:
+
+```bash
+# Check that all features are present in the merged file
+cat ~/.cache/ralph-tui/test-workspace/FEATURES.md
+
+# Should contain sections for Feature A, B, and C
+grep -E "## Feature [ABC]" ~/.cache/ralph-tui/test-workspace/FEATURES.md
+
+# Verify the summary was created
+cat ~/.cache/ralph-tui/test-workspace/SUMMARY.md
+```
+
+### Debugging Conflict Resolution
+
+If conflicts aren't being resolved:
+
+```bash
+# Check iteration logs for conflict events
+grep -r "conflict" ~/.cache/ralph-tui/test-workspace/.ralph-tui/iterations/
+
+# Look for AI resolver output
+grep -r "AI resolver" ~/.cache/ralph-tui/test-workspace/.ralph-tui/iterations/
+
+# Check if fast-path was triggered (trivial conflicts)
+grep -r "fast-path" ~/.cache/ralph-tui/test-workspace/.ralph-tui/iterations/
+```
+
+### Disabling AI Resolution
+
+To test fallback behavior when AI resolution is disabled:
+
+```bash
+# Create a config that disables AI resolution
+cat > ~/.cache/ralph-tui/test-workspace/.ralph-tui/config.toml << 'EOF'
+[conflictResolution]
+enabled = false
+EOF
+
+# Run the test - conflicts should cause task failure or manual intervention
+bun run dev -- run --prd ~/.cache/ralph-tui/test-workspace/test-conflict-prd.json \
+  --cwd ~/.cache/ralph-tui/test-workspace \
+  --parallel 3
+```
+
 ## Contributing
 
 When adding new test scenarios:

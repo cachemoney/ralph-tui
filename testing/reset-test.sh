@@ -36,8 +36,8 @@ fi
 echo -e "Workspace: ${BLUE}$TEST_WORKSPACE${NC}"
 echo ""
 
-# 1. Re-copy the PRD from source (always clean)
-echo -e "${YELLOW}[1/5] Resetting test-prd.json...${NC}"
+# 1. Re-copy PRDs from source (always clean)
+echo -e "${YELLOW}[1/5] Resetting PRD files...${NC}"
 if [ -f "$SCRIPT_DIR/test-prd.json" ]; then
     cp "$SCRIPT_DIR/test-prd.json" "$TEST_WORKSPACE/test-prd.json"
     echo -e "${GREEN}  Re-copied test-prd.json from source (all tasks reset)${NC}"
@@ -45,11 +45,22 @@ else
     echo -e "${RED}  Warning: source test-prd.json not found at $SCRIPT_DIR/test-prd.json${NC}"
 fi
 
+# Also reset conflict PRD if it exists in workspace
+if [ -f "$TEST_WORKSPACE/test-conflict-prd.json" ]; then
+    if [ -f "$SCRIPT_DIR/test-conflict-prd.json" ]; then
+        cp "$SCRIPT_DIR/test-conflict-prd.json" "$TEST_WORKSPACE/test-conflict-prd.json"
+        echo -e "${GREEN}  Re-copied test-conflict-prd.json from source${NC}"
+    fi
+fi
+
 # 2. Clean up test workspace outputs
 echo -e "${YELLOW}[2/5] Cleaning test workspace outputs...${NC}"
 rm -f "$TEST_WORKSPACE"/output-*.txt
 rm -f "$TEST_WORKSPACE"/merged-*.txt
 rm -f "$TEST_WORKSPACE"/summary.txt
+# Conflict test outputs
+rm -f "$TEST_WORKSPACE"/FEATURES.md
+rm -f "$TEST_WORKSPACE"/SUMMARY.md
 echo -e "${GREEN}  Removed generated output files${NC}"
 
 # 3. Clean up .ralph-tui session state
@@ -82,5 +93,10 @@ echo ""
 echo -e "${YELLOW}[5/5] Summary...${NC}"
 echo -e "${GREEN}Test environment reset complete!${NC}"
 echo ""
-echo -e "To run the test:"
-echo -e "  ${BLUE}bun run dev -- run --prd $TEST_WORKSPACE/test-prd.json --cwd $TEST_WORKSPACE${NC}"
+echo -e "${YELLOW}Available tests:${NC}"
+echo ""
+echo -e "  ${GREEN}1. Basic parallel execution test:${NC}"
+echo -e "     ${BLUE}bun run dev -- run --prd $TEST_WORKSPACE/test-prd.json --cwd $TEST_WORKSPACE${NC}"
+echo ""
+echo -e "  ${GREEN}2. Conflict resolution test (triggers AI merge resolution):${NC}"
+echo -e "     ${BLUE}bun run dev -- run --prd $TEST_WORKSPACE/test-conflict-prd.json --cwd $TEST_WORKSPACE --parallel 3${NC}"

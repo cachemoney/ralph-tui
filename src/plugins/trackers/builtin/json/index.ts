@@ -314,6 +314,8 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
   private cacheTime: number = 0;
   private readonly CACHE_TTL_MS = 1000; // 1 second cache TTL
   private epicId: string = ''; // Stores prd:<name> or empty
+  /** Write lock to prevent interleaved read-modify-write operations */
+  private writeLock: Promise<void> = Promise.resolve();
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
@@ -455,83 +457,122 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
     return tasks[0];
   }
 
+  /**
+   * Execute a function while holding the write lock.
+   * Ensures atomic read-modify-write operations by serializing access.
+   * This prevents race conditions when multiple callers try to update the PRD concurrently.
+   */
+  private async withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    // Wait for any pending write to complete
+    const previousLock = this.writeLock;
+
+    // Create a new promise that will resolve when our operation completes
+    let releaseLock: () => void;
+    this.writeLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+
+    try {
+      // Wait for the previous operation to finish
+      await previousLock;
+      // Now we have exclusive access - run the operation
+      return await fn();
+    } finally {
+      // Release the lock so the next operation can proceed
+      releaseLock!();
+    }
+  }
+
   async completeTask(
     id: string,
     reason?: string
   ): Promise<TaskCompletionResult> {
-    try {
-      const prd = await this.readPrd();
-      const storyIndex = prd.userStories.findIndex((s) => s.id === id);
+    // Use write lock to ensure atomic read-modify-write
+    // This prevents race conditions when multiple tasks complete concurrently
+    return this.withWriteLock(async () => {
+      try {
+        // Invalidate cache to ensure we read the latest state
+        // This is critical when multiple operations happen in quick succession
+        this.prdCache = null;
 
-      if (storyIndex === -1) {
+        const prd = await this.readPrd();
+        const storyIndex = prd.userStories.findIndex((s) => s.id === id);
+
+        if (storyIndex === -1) {
+          return {
+            success: false,
+            message: `Task ${id} not found`,
+            error: 'Task not found in prd.json',
+          };
+        }
+
+        // Update the story
+        const story = prd.userStories[storyIndex];
+        if (!story) {
+          return {
+            success: false,
+            message: `Task ${id} not found`,
+            error: 'Task not found in prd.json',
+          };
+        }
+
+        story.passes = true;
+        if (reason) {
+          story.completionNotes = reason;
+        }
+
+        // Write back to file
+        await this.writePrd(prd);
+
+        return {
+          success: true,
+          message: `Task ${id} marked as complete`,
+          task: storyToTask(story, prd.name),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
         return {
           success: false,
-          message: `Task ${id} not found`,
-          error: 'Task not found in prd.json',
+          message: `Failed to complete task ${id}`,
+          error: message,
         };
       }
-
-      // Update the story
-      const story = prd.userStories[storyIndex];
-      if (!story) {
-        return {
-          success: false,
-          message: `Task ${id} not found`,
-          error: 'Task not found in prd.json',
-        };
-      }
-
-      story.passes = true;
-      if (reason) {
-        story.completionNotes = reason;
-      }
-
-      // Write back to file
-      await this.writePrd(prd);
-
-      return {
-        success: true,
-        message: `Task ${id} marked as complete`,
-        task: storyToTask(story, prd.name),
-      };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        message: `Failed to complete task ${id}`,
-        error: message,
-      };
-    }
+    });
   }
 
   async updateTaskStatus(
     id: string,
     status: TrackerTaskStatus
   ): Promise<TrackerTask | undefined> {
-    try {
-      const prd = await this.readPrd();
-      const storyIndex = prd.userStories.findIndex((s) => s.id === id);
+    // Use write lock to ensure atomic read-modify-write
+    return this.withWriteLock(async () => {
+      try {
+        // Invalidate cache to ensure we read the latest state
+        this.prdCache = null;
 
-      if (storyIndex === -1) {
+        const prd = await this.readPrd();
+        const storyIndex = prd.userStories.findIndex((s) => s.id === id);
+
+        if (storyIndex === -1) {
+          return undefined;
+        }
+
+        const story = prd.userStories[storyIndex];
+        if (!story) {
+          return undefined;
+        }
+
+        // Update the passes field based on status
+        story.passes = statusToPasses(status);
+
+        // Write back to file
+        await this.writePrd(prd);
+
+        return storyToTask(story, prd.name);
+      } catch {
         return undefined;
       }
-
-      const story = prd.userStories[storyIndex];
-      if (!story) {
-        return undefined;
-      }
-
-      // Update the passes field based on status
-      story.passes = statusToPasses(status);
-
-      // Write back to file
-      await this.writePrd(prd);
-
-      return storyToTask(story, prd.name);
-    } catch (err) {
-      console.error(`Failed to update task ${id} status:`, err);
-      return undefined;
-    }
+    });
   }
 
   /**
@@ -597,6 +638,26 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
    */
   getFilePath(): string {
     return this.filePath;
+  }
+
+  /**
+   * Get paths to state files that should be preserved during git merges.
+   * For JSON tracker, this is the prd.json file which contains task completion status.
+   */
+  getStateFiles(): string[] {
+    if (this.filePath) {
+      return [this.filePath];
+    }
+    return [];
+  }
+
+  /**
+   * Clear the internal cache to force re-reading from disk.
+   * Used after tracker state files are restored following a git merge.
+   */
+  clearCache(): void {
+    this.prdCache = null;
+    this.cacheTime = 0;
   }
 
   /**

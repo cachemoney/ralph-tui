@@ -176,6 +176,10 @@ export interface RunAppProps {
   parallelConflictTaskTitle?: string;
   /** Whether AI conflict resolution is running */
   parallelAiResolving?: boolean;
+  /** The file currently being resolved by AI */
+  parallelCurrentlyResolvingFile?: string;
+  /** Whether to show the conflict panel (true during Phase 2 conflict resolution) */
+  parallelShowConflicts?: boolean;
   /** Maps task IDs to worker IDs for output routing in parallel mode */
   parallelTaskIdToWorkerId?: Map<string, string>;
   /** Task IDs that completed locally but merge failed (shows ⚠ in TUI) */
@@ -196,12 +200,10 @@ export interface RunAppProps {
   onParallelKill?: () => Promise<void>;
   /** Callback to restart parallel execution after stop/complete */
   onParallelStart?: () => void;
-  /** Callback to abort conflict resolution and rollback the merge */
-  onConflictAbort?: () => Promise<void>;
-  /** Callback to accept AI resolution for a specific file */
-  onConflictAccept?: (filePath: string) => void;
-  /** Callback to accept all AI resolutions */
-  onConflictAcceptAll?: () => void;
+  /** Callback when user requests conflict resolution retry (r key in failure state) */
+  onConflictRetry?: () => void;
+  /** Callback when user requests to skip a failed merge (s key in failure state) */
+  onConflictSkip?: () => void;
 }
 
 /**
@@ -451,6 +453,8 @@ export function RunApp({
   parallelConflictTaskId = '',
   parallelConflictTaskTitle = '',
   parallelAiResolving = false,
+  parallelCurrentlyResolvingFile = '',
+  parallelShowConflicts = false,
   parallelTaskIdToWorkerId,
   parallelCompletedLocallyTaskIds,
   parallelAutoCommitSkippedTaskIds: _parallelAutoCommitSkippedTaskIds, // Reserved for future status bar warning
@@ -461,9 +465,8 @@ export function RunApp({
   onParallelResume,
   onParallelKill,
   onParallelStart,
-  onConflictAbort,
-  onConflictAccept,
-  onConflictAcceptAll,
+  onConflictRetry,
+  onConflictSkip,
 }: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const renderer = useRenderer();
@@ -1347,13 +1350,17 @@ export function RunApp({
     }
   }, [currentTaskId]);
 
-  // Auto-show conflict panel when conflicts are detected in parallel mode
+  // Auto-show conflict panel when Phase 2 conflict resolution starts
+  // Only show when parallelShowConflicts is true (set by conflict:ai-resolving event),
+  // not when conflicts are merely detected during Phase 1 merge attempts
   useEffect(() => {
-    if (isParallelMode && parallelConflicts.length > 0) {
+    if (isParallelMode && parallelShowConflicts && parallelConflicts.length > 0) {
       setShowConflictPanel(true);
       setConflictSelectedIndex(0);
+    } else if (!parallelShowConflicts) {
+      setShowConflictPanel(false);
     }
-  }, [isParallelMode, parallelConflicts]);
+  }, [isParallelMode, parallelShowConflicts, parallelConflicts]);
 
   // Calculate the number of items in iteration history (iterations + pending)
   const iterationHistoryLength = Math.max(iterations.length, totalIterations);
@@ -1489,12 +1496,13 @@ export function RunApp({
 
       // When conflict resolution panel is showing, handle conflict-specific keys
       if (showConflictPanel) {
+        // Check if we're in failure state (has failed resolutions and not currently resolving)
+        const hasFailures = !parallelAiResolving &&
+          parallelConflictResolutions.some((r) => !r.success);
+
         switch (key.name) {
           case 'escape':
-            // Abort conflict resolution and rollback
-            if (onConflictAbort) {
-              onConflictAbort().catch(() => {});
-            }
+            // Close conflict panel (AI resolution continues in background)
             setShowConflictPanel(false);
             break;
           case 'j':
@@ -1505,26 +1513,19 @@ export function RunApp({
           case 'up':
             setConflictSelectedIndex((prev) => Math.max(prev - 1, 0));
             break;
-          case 'a':
-            // Accept AI resolution for the selected file
-            if (onConflictAccept && parallelConflicts[conflictSelectedIndex]) {
-              onConflictAccept(parallelConflicts[conflictSelectedIndex].filePath);
-            }
-            break;
           case 'r':
-            // Reject - abort conflict resolution for this merge
-            if (onConflictAbort) {
-              onConflictAbort().catch(() => {});
+            // Retry AI resolution (only in failure state)
+            if (hasFailures && onConflictRetry) {
+              onConflictRetry();
             }
-            setShowConflictPanel(false);
             break;
-        }
-        // Handle shift+A for Accept All (key.shift is true when shift is held)
-        if (key.shift && key.name === 'a') {
-          if (onConflictAcceptAll) {
-            onConflictAcceptAll();
-          }
-          setShowConflictPanel(false);
+          case 's':
+            // Skip this task's merge (only in failure state)
+            if (hasFailures && onConflictSkip) {
+              onConflictSkip();
+              setShowConflictPanel(false);
+            }
+            break;
         }
         return;
       }
@@ -2913,7 +2914,10 @@ export function RunApp({
         taskId={parallelConflictTaskId}
         taskTitle={parallelConflictTaskTitle}
         aiResolving={parallelAiResolving}
+        currentlyResolvingFile={parallelCurrentlyResolvingFile}
         selectedIndex={conflictSelectedIndex}
+        onRetry={onConflictRetry}
+        onSkip={onConflictSkip}
       />
 
       {/* Settings View */}

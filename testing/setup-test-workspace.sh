@@ -47,10 +47,12 @@ cd "$TEST_WORKSPACE"
 git init --initial-branch=main
 echo -e "${GREEN}  Git repo initialized${NC}"
 
-# Copy test PRD to workspace
-echo -e "${YELLOW}[3/6] Copying test PRD...${NC}"
+# Copy test PRDs to workspace
+echo -e "${YELLOW}[3/6] Copying test PRDs...${NC}"
 cp "$SCRIPT_DIR/test-prd.json" "$TEST_WORKSPACE/test-prd.json"
 echo -e "${GREEN}  Copied test-prd.json to workspace${NC}"
+cp "$SCRIPT_DIR/test-conflict-prd.json" "$TEST_WORKSPACE/test-conflict-prd.json"
+echo -e "${GREEN}  Copied test-conflict-prd.json to workspace${NC}"
 
 # Create initial files
 echo -e "${YELLOW}[4/6] Creating initial files...${NC}"
@@ -63,34 +65,41 @@ This is a test workspace for manually testing Ralph-TUI end-to-end workflow.
 
 **Source**: Created by \`$SCRIPT_DIR/setup-test-workspace.sh\`
 
-## Purpose
+## Available Tests
 
-This workspace is used to test:
-- Task selection and execution
-- Parallel task execution (TEST-001, TEST-002, TEST-003 can run in parallel)
-- Dependency resolution (TEST-004 depends on TEST-001 and TEST-002)
-- Final aggregation (TEST-005 depends on TEST-003 and TEST-004)
+### 1. Basic Parallel Execution Test (\`test-prd.json\`)
 
-## Files
-
-- \`test-prd.json\` - The test PRD (copied from source, modified during runs)
-- \`output-a.txt\` - Created by TEST-001
-- \`output-b.txt\` - Created by TEST-002
-- \`output-c.txt\` - Created by TEST-003
-- \`merged-ab.txt\` - Created by TEST-004 (combines A and B)
-- \`summary.txt\` - Created by TEST-005 (final summary)
-
-## Running Tests
+Tests task selection, parallel execution, and dependency resolution.
+Tasks create **separate files** so no merge conflicts occur.
 
 \`\`\`bash
-# From ralph-tui directory
 bun run dev -- run --prd $TEST_WORKSPACE/test-prd.json --cwd $TEST_WORKSPACE
 \`\`\`
+
+### 2. Conflict Resolution Test (\`test-conflict-prd.json\`)
+
+Tests AI conflict resolution during parallel execution.
+Multiple tasks modify the **same file** to trigger merge conflicts.
+
+\`\`\`bash
+bun run dev -- run --prd $TEST_WORKSPACE/test-conflict-prd.json --cwd $TEST_WORKSPACE --parallel 3
+\`\`\`
+
+## Files Created
+
+### Basic Test
+- \`output-a.txt\`, \`output-b.txt\`, \`output-c.txt\` - Individual task outputs
+- \`merged-ab.txt\` - Combines A and B
+- \`summary.txt\` - Final summary
+
+### Conflict Test
+- \`FEATURES.md\` - Shared file modified by all parallel tasks (triggers conflicts)
+- \`SUMMARY.md\` - Summary created after conflicts are resolved
 
 ## Reset
 
 \`\`\`bash
-# Soft reset (re-copies PRD, cleans outputs)
+# Soft reset (re-copies PRDs, cleans outputs)
 $SCRIPT_DIR/reset-test.sh
 
 # Hard reset (full clean slate)
@@ -131,11 +140,18 @@ echo -e "${GREEN}=== Setup Complete ===${NC}"
 echo ""
 echo -e "Test workspace created at: ${BLUE}$TEST_WORKSPACE${NC}"
 echo ""
-echo -e "To run the test:"
-echo -e "  ${BLUE}bun run dev -- run --prd $TEST_WORKSPACE/test-prd.json --cwd $TEST_WORKSPACE${NC}"
+echo -e "${YELLOW}Available tests:${NC}"
 echo ""
-echo -e "To reset everything:"
-echo -e "  ${BLUE}./testing/reset-test.sh${NC}"
+echo -e "  ${GREEN}1. Basic parallel execution test:${NC}"
+echo -e "     ${BLUE}bun run dev -- run --prd $TEST_WORKSPACE/test-prd.json --cwd $TEST_WORKSPACE${NC}"
 echo ""
-echo -e "To fully reset git (hard reset to initial state):"
-echo -e "  ${BLUE}cd $TEST_WORKSPACE && git reset --hard test-start && git clean -fd${NC}"
+echo -e "  ${GREEN}2. Conflict resolution test (triggers AI merge resolution):${NC}"
+echo -e "     ${BLUE}bun run dev -- run --prd $TEST_WORKSPACE/test-conflict-prd.json --cwd $TEST_WORKSPACE --parallel 3${NC}"
+echo ""
+echo -e "${YELLOW}Reset commands:${NC}"
+echo ""
+echo -e "  Soft reset (re-copies PRDs, cleans outputs):"
+echo -e "     ${BLUE}./testing/reset-test.sh${NC}"
+echo ""
+echo -e "  Hard reset (full git clean slate):"
+echo -e "     ${BLUE}cd $TEST_WORKSPACE && git reset --hard test-start && git clean -fd${NC}"

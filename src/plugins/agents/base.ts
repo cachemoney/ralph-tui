@@ -99,6 +99,7 @@ import type {
 } from './types.js';
 import { SandboxWrapper, detectSandboxMode } from '../../sandbox/index.js';
 import type { SandboxConfig } from '../../sandbox/types.js';
+import { appendWithCharLimit as appendWithSharedCharLimit } from '../../utils/buffer-limits.js';
 
 /**
  * Internal representation of a running execution.
@@ -150,33 +151,7 @@ function appendWithCharLimit(
   maxChars: number,
   prefix = STREAM_TRUNCATED_PREFIX
 ): string {
-  if (!chunk) return current;
-  if (maxChars <= 0) return '';
-
-  const totalLen = current.length + chunk.length;
-  if (totalLen <= maxChars) {
-    return current + chunk;
-  }
-
-  if (maxChars <= prefix.length) {
-    return prefix.slice(0, maxChars);
-  }
-
-  const keep = maxChars - prefix.length;
-  const combinedTailStart = totalLen - keep;
-
-  let tail: string;
-  if (combinedTailStart >= current.length) {
-    const startInChunk = combinedTailStart - current.length;
-    tail = chunk.slice(startInChunk);
-  } else {
-    const tailFromCurrent = current.slice(combinedTailStart);
-    const remaining = keep - tailFromCurrent.length;
-    const tailFromChunk = remaining > 0 ? chunk.slice(-remaining) : '';
-    tail = tailFromCurrent + tailFromChunk;
-  }
-
-  return prefix + tail;
+  return appendWithSharedCharLimit(current, chunk, maxChars, prefix);
 }
 
 /**

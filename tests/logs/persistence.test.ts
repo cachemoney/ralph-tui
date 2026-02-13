@@ -243,10 +243,7 @@ describe('buildMetadata', () => {
   });
 });
 
-// Note: These tests pass in isolation but may fail when run with the full test suite
-// due to module mocking interference from other test files (execution-engine.test.ts
-// mocks the logs module globally). Run `bun test tests/logs/persistence.test.ts` to verify.
-describe.skipIf(process.env.CI === 'true')('saveIterationLog and loadIterationLog', () => {
+describe('saveIterationLog and loadIterationLog', () => {
   let tempDir: string;
 
   beforeEach(async () => {

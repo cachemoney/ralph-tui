@@ -4,8 +4,7 @@
  * Supports configurable error handling strategies: retry, skip, abort.
  */
 
-import { closeSync, openSync, writeSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -54,6 +53,7 @@ import { saveIterationLog, buildSubagentTrace, getRecentProgressSummary, getCode
 import { performAutoCommit } from './auto-commit.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
+import { appendWithCharLimit as appendWithSharedCharLimit } from '../utils/buffer-limits.js';
 
 /**
  * Pattern to detect completion signal in agent output
@@ -99,33 +99,7 @@ function appendWithCharLimit(
   maxChars: number,
   prefix = OUTPUT_TRUNCATED_PREFIX
 ): string {
-  if (!chunk) return current;
-  if (maxChars <= 0) return '';
-
-  const totalLen = current.length + chunk.length;
-  if (totalLen <= maxChars) {
-    return current + chunk;
-  }
-
-  if (maxChars <= prefix.length) {
-    return prefix.slice(0, maxChars);
-  }
-
-  const keep = maxChars - prefix.length;
-  const combinedTailStart = totalLen - keep;
-
-  let tail: string;
-  if (combinedTailStart >= current.length) {
-    const startInChunk = combinedTailStart - current.length;
-    tail = chunk.slice(startInChunk);
-  } else {
-    const tailFromCurrent = current.slice(combinedTailStart);
-    const remaining = keep - tailFromCurrent.length;
-    const tailFromChunk = remaining > 0 ? chunk.slice(-remaining) : '';
-    tail = tailFromCurrent + tailFromChunk;
-  }
-
-  return prefix + tail;
+  return appendWithSharedCharLimit(current, chunk, maxChars, prefix);
 }
 
 /**
@@ -991,69 +965,97 @@ export class ExecutionEngine {
     // For Claude and OpenCode, we use the onJsonlMessage callback which gets pre-parsed messages.
     const isDroidAgent = this.agent?.meta.id === 'droid';
     const droidJsonlParser = isDroidAgent ? createDroidStreamingJsonlParser() : null;
-    let rawOutputTempDir: string | undefined;
-    let rawStdoutFilePath: string | undefined;
-    let rawStderrFilePath: string | undefined;
-    let rawStdoutFd: number | undefined;
-    let rawStderrFd: number | undefined;
-
-    const closeRawOutputFiles = (): void => {
-      if (rawStdoutFd !== undefined) {
-        try {
-          closeSync(rawStdoutFd);
-        } catch {
-          // Ignore close errors for best-effort cleanup
-        }
-        rawStdoutFd = undefined;
-      }
-
-      if (rawStderrFd !== undefined) {
-        try {
-          closeSync(rawStderrFd);
-        } catch {
-          // Ignore close errors for best-effort cleanup
-        }
-        rawStderrFd = undefined;
-      }
+    type RawStreamName = 'stdout' | 'stderr';
+    type RawOutputState = {
+      filePath?: string;
+      fileHandle?: FileHandle;
+      writeChain: Promise<void>;
     };
 
-    const appendRawChunk = (
-      stream: 'stdout' | 'stderr',
-      chunk: string
-    ): void => {
-      if (stream === 'stdout' && rawStdoutFd !== undefined) {
-        try {
-          writeSync(rawStdoutFd, chunk, undefined, 'utf-8');
-        } catch {
-          closeRawOutputFiles();
-          rawStdoutFilePath = undefined;
-          rawStderrFilePath = undefined;
-        }
+    let rawOutputTempDir: string | undefined;
+    const rawOutput: Record<RawStreamName, RawOutputState> = {
+      stdout: { writeChain: Promise.resolve() },
+      stderr: { writeChain: Promise.resolve() },
+    };
+
+    const closeRawOutputStream = async (stream: RawStreamName): Promise<void> => {
+      const streamState = rawOutput[stream];
+      if (!streamState.fileHandle) {
         return;
       }
 
-      if (stream === 'stderr' && rawStderrFd !== undefined) {
-        try {
-          writeSync(rawStderrFd, chunk, undefined, 'utf-8');
-        } catch {
-          closeRawOutputFiles();
-          rawStdoutFilePath = undefined;
-          rawStderrFilePath = undefined;
-        }
+      try {
+        await streamState.fileHandle.close();
+      } catch {
+        // Ignore close errors for best-effort cleanup.
+      }
+
+      streamState.fileHandle = undefined;
+    };
+
+    const closeRawOutputFiles = async (): Promise<void> => {
+      await Promise.all([
+        closeRawOutputStream('stdout'),
+        closeRawOutputStream('stderr'),
+      ]);
+    };
+
+    const flushRawOutputWrites = async (): Promise<void> => {
+      await Promise.allSettled([
+        rawOutput.stdout.writeChain,
+        rawOutput.stderr.writeChain,
+      ]);
+    };
+
+    const appendRawChunk = (stream: RawStreamName, chunk: string): void => {
+      if (!chunk) {
+        return;
+      }
+
+      const streamState = rawOutput[stream];
+      if (!streamState.fileHandle) {
+        return;
+      }
+
+      streamState.writeChain = streamState.writeChain
+        .then(async () => {
+          if (!streamState.fileHandle) {
+            return;
+          }
+          await streamState.fileHandle.write(chunk, undefined, 'utf-8');
+        })
+        .catch(async () => {
+          // Disable only the failing stream and preserve the other stream if possible.
+          streamState.filePath = undefined;
+          await closeRawOutputStream(stream);
+        });
+    };
+
+    const initRawOutputStream = async (
+      stream: RawStreamName,
+      filename: string,
+    ): Promise<void> => {
+      if (!rawOutputTempDir) {
+        return;
+      }
+
+      const filePath = join(rawOutputTempDir, filename);
+      try {
+        rawOutput[stream].fileHandle = await open(filePath, 'w');
+        rawOutput[stream].filePath = filePath;
+      } catch {
+        rawOutput[stream].filePath = undefined;
+        await closeRawOutputStream(stream);
       }
     };
 
     try {
       try {
         rawOutputTempDir = await mkdtemp(join(tmpdir(), 'ralph-iter-'));
-        rawStdoutFilePath = join(rawOutputTempDir, 'stdout.raw');
-        rawStderrFilePath = join(rawOutputTempDir, 'stderr.raw');
-        rawStdoutFd = openSync(rawStdoutFilePath, 'w');
-        rawStderrFd = openSync(rawStderrFilePath, 'w');
+        await initRawOutputStream('stdout', 'stdout.raw');
+        await initRawOutputStream('stderr', 'stderr.raw');
       } catch {
-        closeRawOutputFiles();
-        rawStdoutFilePath = undefined;
-        rawStderrFilePath = undefined;
+        rawOutputTempDir = undefined;
       }
 
       // Execute agent with subagent tracing if supported
@@ -1170,7 +1172,8 @@ export class ExecutionEngine {
         }
       }
 
-      closeRawOutputFiles();
+      await flushRawOutputWrites();
+      await closeRawOutputFiles();
 
       // Check for rate limit condition before processing result
       const rateLimitResult = this.checkForRateLimit(
@@ -1318,8 +1321,8 @@ export class ExecutionEngine {
         agentSwitches: this.currentIterationAgentSwitches.length > 0 ? [...this.currentIterationAgentSwitches] : undefined,
         completionSummary,
         sandboxConfig: this.config.sandbox,
-        rawStdoutFilePath,
-        rawStderrFilePath,
+        rawStdoutFilePath: rawOutput.stdout.filePath,
+        rawStderrFilePath: rawOutput.stderr.filePath,
       });
 
       this.emit({
@@ -1352,7 +1355,8 @@ export class ExecutionEngine {
 
       return failedResult;
     } finally {
-      closeRawOutputFiles();
+      await flushRawOutputWrites();
+      await closeRawOutputFiles();
       if (rawOutputTempDir) {
         await rm(rawOutputTempDir, { recursive: true, force: true }).catch(() => {
           // Ignore cleanup errors for temporary files

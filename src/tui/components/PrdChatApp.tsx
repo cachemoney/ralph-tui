@@ -954,6 +954,14 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
         }
       }
 
+      // For non-intercepted text, allow native paste and avoid image-path detection work.
+      if (!pasteType.intercept) {
+        if (!feedbackShown && hasText) {
+          onTextPaste();
+        }
+        return;
+      }
+
       // Phase 2: If no clipboard image, try to parse pasted text as image path
       // This handles cases where user pastes a file path to an image
       if (hasText) {
@@ -982,11 +990,6 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
           onTextPaste();
         }
         return;
-      }
-
-      // For non-intercepted text, native paste already inserted content.
-      if (!feedbackShown && hasText) {
-        onTextPaste();
       }
     },
     [imagesEnabled, attachFromClipboard, attachImage, onTextPaste, toast],

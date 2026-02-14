@@ -83,6 +83,25 @@ import { spawnSync } from 'node:child_process';
 import { basename } from 'node:path';
 import { getEnvExclusionReport, formatEnvExclusionReport } from '../plugins/agents/base.js';
 
+type PersistState = (state: PersistedSessionState) => void | Promise<void>;
+
+type ParallelFailureCarrier = {
+  failureMessage: string | null;
+};
+
+export function applyParallelFailureState(
+  currentState: PersistedSessionState,
+  parallelState: ParallelFailureCarrier,
+  failureMessage: string,
+  persistState: PersistState
+): PersistedSessionState {
+  const nextFailureMessage = parallelState.failureMessage ?? failureMessage;
+  parallelState.failureMessage = nextFailureMessage;
+  const nextState = failSession(currentState, nextFailureMessage);
+  persistState(nextState);
+  return nextState;
+}
+
 /**
  * Determine if all tasks are complete based on parallel/sequential mode state.
  *
@@ -994,6 +1013,8 @@ interface RunAppWrapperProps {
   activeWorkerCount?: number;
   /** Total number of workers */
   totalWorkerCount?: number;
+  /** Failure message for parallel execution */
+  parallelFailureMessage?: string;
   /** Callback to pause parallel execution */
   onParallelPause?: () => void;
   /** Callback to resume parallel execution */
@@ -1049,6 +1070,7 @@ function RunAppWrapper({
   parallelCompletedLocallyTaskIds,
   parallelAutoCommitSkippedTaskIds,
   parallelMergedTaskIds,
+  parallelFailureMessage,
   activeWorkerCount,
   totalWorkerCount,
   onParallelPause,
@@ -1251,6 +1273,7 @@ function RunAppWrapper({
       parallelCompletedLocallyTaskIds={parallelCompletedLocallyTaskIds}
       parallelAutoCommitSkippedTaskIds={parallelAutoCommitSkippedTaskIds}
       parallelMergedTaskIds={parallelMergedTaskIds}
+      parallelFailureMessage={parallelFailureMessage}
       activeWorkerCount={activeWorkerCount}
       totalWorkerCount={totalWorkerCount}
       onParallelPause={onParallelPause}
@@ -1571,6 +1594,7 @@ async function runParallelWithTui(
     showConflicts: false,
     /** Maps task IDs to their assigned worker IDs for output routing */
     taskIdToWorkerId: new Map<string, string>(),
+    failureMessage: null as string | null,
     /** Task IDs that completed locally but merge failed (shows ⚠ in TUI) */
     completedLocallyTaskIds: new Set<string>(),
     /** Task IDs where auto-commit was skipped (e.g., files were gitignored) */
@@ -1600,6 +1624,7 @@ async function runParallelWithTui(
   parallelExecutor.on((event: ParallelEvent) => {
     switch (event.type) {
       case 'parallel:started':
+        parallelState.failureMessage = null;
         parallelState.totalGroups = event.totalGroups;
         break;
 
@@ -1765,8 +1790,14 @@ async function runParallelWithTui(
         break;
 
       case 'parallel:failed':
-        currentState = failSession(currentState);
-        savePersistedSession(currentState).catch(() => {});
+        currentState = applyParallelFailureState(
+          currentState,
+          parallelState,
+          event.error,
+          (state) => {
+            savePersistedSession(state).catch(() => {});
+          }
+        );
         break;
     }
 
@@ -1890,6 +1921,7 @@ async function runParallelWithTui(
         parallelCompletedLocallyTaskIds={parallelState.completedLocallyTaskIds}
         parallelAutoCommitSkippedTaskIds={parallelState.autoCommitSkippedTaskIds}
         parallelMergedTaskIds={parallelState.mergedTaskIds}
+        parallelFailureMessage={parallelState.failureMessage ?? undefined}
         activeWorkerCount={parallelState.workers.filter((w) => w.status === 'running').length}
         totalWorkerCount={parallelState.workers.length}
         onParallelPause={() => parallelExecutor.pause()}
@@ -1899,6 +1931,7 @@ async function runParallelWithTui(
         }}
         onParallelStart={() => {
           // Reset executor state and re-run
+          parallelState.failureMessage = null;
           // Use new instances instead of .clear() so React detects state changes
           parallelState.workers = [];
           parallelState.workerOutputs = new Map();
@@ -1957,7 +1990,16 @@ async function runParallelWithTui(
     // Execution finished — TUI stays open for user review
     triggerRerender?.();
   }).catch(() => {
-    // Error already emitted as parallel:failed event; just trigger a re-render
+    // Error already emitted as parallel:failed event, but keep this as a fallback
+    // for engines that reject without emitting the event.
+    currentState = applyParallelFailureState(
+      currentState,
+      parallelState,
+      'Parallel execution failed before startup',
+      (state) => {
+        savePersistedSession(state).catch(() => {});
+      }
+    );
     triggerRerender?.();
   });
 
